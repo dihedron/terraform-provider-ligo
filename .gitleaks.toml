@@ -1,0 +1,11 @@
+# Gitleaks configuration: the default rules, with one allowlist for paths
+# that git ignores and that "make secrets" still sees when it scans the
+# working tree: build output. They are never committed.
+title = "terraform-provider-ligo"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "git-ignored build output"
+paths = ['''(^|/)dist/''', '''(^|/)build/''']

@@ -1,0 +1,82 @@
+# The release of the provider, in the format the Terraform and OpenTofu
+# registries read: one zip per platform, named
+# terraform-provider-ligo_<version>_<os>_<arch>.zip, the registry manifest,
+# and a SHA256SUMS file with its detached GPG signature.
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+
+version: 2
+
+project_name: terraform-provider-ligo
+
+env:
+  - CGO_ENABLED=0
+
+before:
+  hooks:
+    - go mod download
+    - go mod tidy
+
+builds:
+  - id: terraform-provider-ligo
+    main: ./cmd/terraform-provider-ligo
+    # the registries expect the binary named <provider>_v<version>
+    binary: "{{ .ProjectName }}_v{{ .Version }}"
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Name={{.ProjectName}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Description={{.Env._GO_MK_VARS_DESCRIPTION}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Copyright={{.Env._GO_MK_VARS_COPYRIGHT}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.License={{.Env._GO_MK_VARS_LICENSE}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.LicenseURL={{.Env._GO_MK_VARS_LICENSE_URL}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Version={{.Version}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionMajor={{.Major}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionMinor={{.Minor}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.VersionPatch={{.Patch}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Vendor={{.Env._GO_MK_VARS_VENDOR}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.Maintainer={{.Env._GO_MK_VARS_MAINTAINER}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitTag={{.Tag}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitCommit={{.Commit}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitTime={{.CommitDate}}'
+      - -X '{{.Env._GO_MK_VARS_METADATA_PACKAGE}}.GitTreeState={{.GitTreeState}}'
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
+  algorithm: sha256
+  extra_files:
+    - glob: terraform-registry-manifest.json
+      name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
+
+signs:
+  - artifacts: checksum
+    args:
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+
+release:
+  extra_files:
+    - glob: terraform-registry-manifest.json
+      name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
+
+changelog:
+  sort: asc
