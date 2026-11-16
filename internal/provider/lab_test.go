@@ -251,3 +251,39 @@ resource "ligo_binding" "b" {
 		},
 	})
 }
+
+// TestLabInstances runs as an operator, who files what a person decides: an
+// identity provider and a secret store of the plugin types that need no
+// endpoint, each created only once lab.sh iac test approves its request as a
+// person. The apply waits for the approval, files nothing twice, and the
+// removal is approved the same way.
+func TestLabInstances(t *testing.T) {
+	suffix := labEnv(t, "LIGO_LAB_INSTANCE_SUFFIX")
+	cfg := labProvider(t, "2m") + fmt.Sprintf(`
+resource "ligo_identity_provider" "i" {
+  name         = "iac-idp-%[1]s"
+  jurisdiction = "dc/corp-prod"
+  realm        = "prod"
+  type         = "svid.v1"
+}
+resource "ligo_secret_store" "s" {
+  name         = "iac-ss-%[1]s"
+  jurisdiction = "dc/corp-prod"
+  realm        = "prod"
+  type         = "none.v1"
+  description  = "provider lab"
+}
+`, suffix)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6,
+		Steps: []resource.TestStep{
+			{Config: cfg, Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("ligo_identity_provider.i", "revision", "1"),
+				resource.TestCheckResourceAttr("ligo_secret_store.s", "revision", "1"),
+			)},
+			{Config: cfg, PlanOnly: true},
+			{ResourceName: "ligo_secret_store.s", ImportState: true, ImportStateId: "iac-ss-" + suffix, ImportStateVerify: true, ImportStateVerifyIdentifierAttribute: "name",
+				ImportStateVerifyIgnore: []string{"last_change_request"}},
+		},
+	})
+}

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
@@ -356,5 +357,55 @@ resource "ligo_binding" "b" {
 	}
 	if l.targets["ledger-db"]["metadata"].(map[string]any)["state"] != "RETIRED" || l.sources["ledger-app"]["metadata"].(map[string]any)["state"] != "RETIRED" {
 		t.Error("destroy must retire the source and the target, after the binding")
+	}
+}
+
+// TestAccInstanceLifecycle: an identity provider and a secret store, each
+// created only when a person approves, changed, reformatted, imported and
+// retired. approveIn stands for the person.
+func TestAccInstanceLifecycle(t *testing.T) {
+	l := newLigoFake(t)
+	l.approveIn = 300 * time.Millisecond
+	cfg := func(desc, config string) string {
+		return l.hcl(t, fmt.Sprintf(`
+resource "ligo_identity_provider" "dir" {
+  name         = "ldap"
+  jurisdiction = "dc/corp-prod"
+  realm        = "prod"
+  type         = "openldap.v1"
+  config       = jsonencode({ url = "ldaps://ldap.example.org:636" })
+}
+resource "ligo_secret_store" "vault" {
+  name         = "vault-prod"
+  jurisdiction = "dc/corp-prod"
+  realm        = "prod"
+  type         = "vault.v1"
+  description  = %q
+  svid_selector = {
+    match_expr   = "path == \"/ligo/plugin/vault\""
+    jwt_audience = ["https://vault.example.org"]
+  }
+  config = %s
+}
+`, desc, config))
+	}
+	tight := `jsonencode({ address = "https://vault.example.org", role = "ligo" })`
+	loose := `"{ \"role\": \"ligo\", \"address\": \"https://vault.example.org\" }"`
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6,
+		Steps: []resource.TestStep{
+			{Config: cfg("v1", tight), Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("ligo_secret_store.vault", "revision", "1"),
+				resource.TestCheckResourceAttr("ligo_identity_provider.dir", "revision", "1"),
+				resource.TestCheckResourceAttr("ligo_secret_store.vault", "svid_selector.match_expr", `path == "/ligo/plugin/vault"`),
+			)},
+			{Config: cfg("v1", loose), ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{noChange{}}}}, // a reformatting is no diff
+			{Config: cfg("v2", tight), Check: resource.TestCheckResourceAttr("ligo_secret_store.vault", "revision", "2")},
+			{ResourceName: "ligo_secret_store.vault", ImportState: true, ImportStateId: "vault-prod", ImportStateVerify: true, ImportStateVerifyIdentifierAttribute: "name",
+				ImportStateVerifyIgnore: []string{"last_change_request"}},
+		},
+	})
+	if len(l.instances) != 0 {
+		t.Errorf("destroy must retire the instances: %v", l.instances)
 	}
 }
