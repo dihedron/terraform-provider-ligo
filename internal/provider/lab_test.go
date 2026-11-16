@@ -3,6 +3,7 @@
 package provider
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"regexp"
@@ -253,12 +254,17 @@ resource "ligo_binding" "b" {
 }
 
 // TestLabInstances runs as an operator, who files what a person decides: an
-// identity provider and a secret store of the plugin types that need no
-// endpoint, each created only once lab.sh iac test approves its request as a
-// person. The apply waits for the approval, files nothing twice, and the
-// removal is approved the same way.
+// identity provider, a secret store (of the plugin types that need no
+// endpoint) and a platform that wires them, each created only once lab.sh iac
+// test approves its request as a person. The apply waits for the approvals,
+// files nothing twice, and the removals (the platform first) are approved the
+// same way.
 func TestLabInstances(t *testing.T) {
 	suffix := labEnv(t, "LIGO_LAB_INSTANCE_SUFFIX")
+	ca, err := base64.StdEncoding.DecodeString(labEnv(t, "LIGO_LAB_CA_B64"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg := labProvider(t, "2m") + fmt.Sprintf(`
 resource "ligo_identity_provider" "i" {
   name         = "iac-idp-%[1]s"
@@ -273,16 +279,41 @@ resource "ligo_secret_store" "s" {
   type         = "none.v1"
   description  = "provider lab"
 }
-`, suffix)
+resource "ligo_platform" "p" {
+  name         = "iac-pf-%[1]s"
+  jurisdiction = "dc/corp-prod"
+  realm        = "prod"
+  type         = "echo.v1"
+  allowed_source_trust_domains = ["prod.lab"]
+  identity_provider = { type = ligo_identity_provider.i.type, instance = ligo_identity_provider.i.name }
+  secret_store      = { type = ligo_secret_store.s.type, instance = ligo_secret_store.s.name, secret_storage_strategy = "svid" }
+  svid_selector = {
+    match_expr        = "path == \"/ligo/plugin/echo\""
+    allow_shared_svid = true
+  }
+  config = jsonencode({
+    data_address      = "ligo1.ligo.lab:7101"
+    control_address   = "ligo1.ligo.lab:7102"
+    server_id         = "spiffe://prod.lab/ns/lab/sa/echo-server"
+    mode              = "svid"
+    ca_pem            = %[2]q
+    allowed_endpoints = ["ligo1.ligo.lab:7101"]
+  })
+}
+`, suffix, string(ca))
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: protoV6,
 		Steps: []resource.TestStep{
 			{Config: cfg, Check: resource.ComposeAggregateTestCheckFunc(
 				resource.TestCheckResourceAttr("ligo_identity_provider.i", "revision", "1"),
 				resource.TestCheckResourceAttr("ligo_secret_store.s", "revision", "1"),
+				resource.TestCheckResourceAttr("ligo_platform.p", "revision", "1"),
+				resource.TestCheckResourceAttr("ligo_platform.p", "check_existence", "true"),
 			)},
 			{Config: cfg, PlanOnly: true},
 			{ResourceName: "ligo_secret_store.s", ImportState: true, ImportStateId: "iac-ss-" + suffix, ImportStateVerify: true, ImportStateVerifyIdentifierAttribute: "name",
+				ImportStateVerifyIgnore: []string{"last_change_request"}},
+			{ResourceName: "ligo_platform.p", ImportState: true, ImportStateId: "iac-pf-" + suffix, ImportStateVerify: true, ImportStateVerifyIdentifierAttribute: "name",
 				ImportStateVerifyIgnore: []string{"last_change_request"}},
 		},
 	})

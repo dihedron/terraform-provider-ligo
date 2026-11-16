@@ -409,3 +409,63 @@ resource "ligo_secret_store" "vault" {
 		t.Errorf("destroy must retire the instances: %v", l.instances)
 	}
 }
+
+// TestAccPlatformLifecycle: a platform wired to an identity provider and a
+// secret store of the same configuration is created after them and retired
+// before them, every step approved by a person.
+func TestAccPlatformLifecycle(t *testing.T) {
+	l := newLigoFake(t)
+	l.approveIn = 300 * time.Millisecond
+	cfg := func(prefix string) string {
+		return l.hcl(t, fmt.Sprintf(`
+resource "ligo_identity_provider" "dir" {
+  name         = "ldap"
+  jurisdiction = "dc/corp-prod"
+  realm        = "prod"
+  type         = "openldap.v1"
+}
+resource "ligo_secret_store" "vault" {
+  name         = "vault-prod"
+  jurisdiction = "dc/corp-prod"
+  realm        = "prod"
+  type         = "vault.v1"
+}
+resource "ligo_platform" "pg" {
+  name         = "pg-ledger"
+  jurisdiction = "dc/corp-prod"
+  realm        = "prod"
+  type         = "postgres.v1"
+  principal_prefix = %q
+  identity_provider = { type = ligo_identity_provider.dir.type, instance = ligo_identity_provider.dir.name }
+  secret_store      = { type = ligo_secret_store.vault.type, instance = ligo_secret_store.vault.name }
+  config            = jsonencode({ host = "pg.example.org" })
+}
+`, prefix))
+	}
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6,
+		Steps: []resource.TestStep{
+			{Config: cfg("svc_"), Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("ligo_platform.pg", "revision", "1"),
+				resource.TestCheckResourceAttr("ligo_platform.pg", "check_existence", "true"),
+				resource.TestCheckResourceAttr("ligo_platform.pg", "target_jurisdictions.0", "dc/corp-prod/*"),
+			)},
+			{Config: cfg("svc_"), PlanOnly: true},
+			{Config: cfg("app_"), Check: resource.TestCheckResourceAttr("ligo_platform.pg", "revision", "2")},
+			{ResourceName: "ligo_platform.pg", ImportState: true, ImportStateId: "pg-ledger", ImportStateVerify: true, ImportStateVerifyIdentifierAttribute: "name",
+				ImportStateVerifyIgnore: []string{"last_change_request"}},
+		},
+	})
+	if len(l.instances) != 0 {
+		t.Errorf("destroy must retire the instances: %v", l.instances)
+	}
+	var retired []string
+	for _, id := range l.order {
+		if cr := l.crs[id]; cr["operation"] == "DELETE" {
+			retired = append(retired, cr["resourceType"].(string))
+		}
+	}
+	if len(retired) != 3 || retired[0] != "PLATFORM" {
+		t.Errorf("the platform goes before the instances it wires: %v", retired)
+	}
+}

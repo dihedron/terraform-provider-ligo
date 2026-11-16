@@ -25,6 +25,10 @@ func (l *ligoFake) instanceRoutes(typ, name string) {
 	h("GET "+base, func(*http.Request) (int, string) {
 		l.mu.Lock()
 		defer l.mu.Unlock()
+		if l.unavailable > 0 {
+			l.unavailable--
+			return problemJSON(503, "unavailable", "the platform's plugin cannot be reached")
+		}
 		i, ok := l.instances[typ+"/"+name]
 		if !ok {
 			return problemJSON(404, "not-found", "no such instance")
@@ -114,6 +118,25 @@ func (l *ligoFake) applyInstance(typ, name, op string, body map[string]any) {
 	for k, v := range body {
 		if k != "expectedRevision" {
 			def[k] = v
+		}
+	}
+	if typ == "PLATFORM" { // the defaults of ligo, and the wiring the way a platform reads it
+		if _, ok := def["targetJurisdictions"]; !ok {
+			def["targetJurisdictions"] = []any{md["jurisdiction"].(string) + "/*"}
+		}
+		if _, ok := def["checkExistence"]; !ok {
+			def["checkExistence"] = true
+		}
+		i["targetJurisdictions"] = def["targetJurisdictions"]
+		i["identityProvider"], i["secretStore"] = map[string]any{}, map[string]any{}
+		for k, w := range map[string]string{"identityProvider": "instance", "secretStore": "instance"} {
+			if m, ok := def[k].(map[string]any); ok {
+				i[k] = map[string]any{"type": m["type"], w: m[w]}
+			}
+		}
+		i["allowedSourceTrustDomains"] = []any{}
+		if v, ok := def["allowedSourceTrustDomains"]; ok {
+			i["allowedSourceTrustDomains"] = v
 		}
 	}
 	i["definition"] = def
