@@ -21,6 +21,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	fwprovider "github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
@@ -252,5 +253,39 @@ func TestPasswordFileTrimmed(t *testing.T) {
 	user, pass, _ := (&http.Request{Header: http.Header{"Authorization": {a.auth[0]}}}).BasicAuth()
 	if user != "olga" || pass != testPassword {
 		t.Errorf("the server saw %q:%q", user, pass)
+	}
+}
+
+// The Workload API path: a socket nobody listens on is an error, not a hang,
+// whether the socket is configured or comes from the environment.
+func TestUnreachableSpiffeSocket(t *testing.T) {
+	a := newAdmin(t)
+	sock := "unix://" + filepath.Join(t.TempDir(), "none.sock")
+	for name, tc := range map[string]struct {
+		m   model
+		env bool
+	}{
+		"attribute":   {m: model{ServerURL: types.StringValue(a.URL), SpiffeSocket: types.StringValue(sock)}},
+		"environment": {m: model{ServerURL: types.StringValue(a.URL)}, env: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if tc.env {
+				t.Setenv("SPIFFE_ENDPOINT_SOCKET", sock)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
+			if _, err := connect(ctx, tc.m); err == nil || !strings.Contains(err.Error(), "spiffe_socket") {
+				t.Fatalf("connect: %v, want a spiffe_socket error", err)
+			}
+		})
+	}
+}
+
+// A server_id that is no SPIFFE ID is refused with a password, too.
+func TestBadServerIDWithPassword(t *testing.T) {
+	a := newAdmin(t)
+	resp := configure(t, map[string]string{"server_url": a.URL, "ca_cert": a.ca, "username": "o", "password_file": passwordFile(t, 0o600), "server_id": "not an id"}, nil)
+	if !strings.Contains(errorText(resp.Diagnostics), "server_id") {
+		t.Fatalf("diagnostics: %s", errorText(resp.Diagnostics))
 	}
 }
