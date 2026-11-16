@@ -8,6 +8,9 @@ import (
 
 	"github.com/dihedron/ligo/pkg/adminclient"
 	"github.com/dihedron/terraform-provider-ligo/internal/jsonnorm"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 // The write path, shared by every resource (spec §3.3): a mutation is a change
@@ -162,5 +165,44 @@ func writeError(f filing, err error) error {
 		return fmt.Errorf("%s: the caller may not file this change: %w", what, err)
 	default:
 		return fmt.Errorf("filing the change of %s: %w", what, err)
+	}
+}
+
+// stateChange files a change of state (deprecate, reactivate, retire, of a
+// resource or of one of its access levels) with the revision it is based on.
+// It carries no lock: ligo refuses a managed flag on it.
+func (s *Session) stateChange(ctx context.Context, kind, name string, call func(context.Context) (adminclient.ChangeRequest, error)) (adminclient.ChangeRequest, error) {
+	return s.apply(ctx, filing{kind: kind, name: name, file: call})
+}
+
+// lockChecks is what a plan refuses or says before any filing (spec §3.7): a
+// person cannot own, another automation's resource is not overwritten, and a
+// request that is still pending is told. changes is false for a plan that has
+// nothing to file.
+func (s *Session) lockChecks(ctx context.Context, kind, name string, managed bool, stateOwner types.String, exists, changes bool, payload map[string]any, diags *diag.Diagnostics) {
+	if !changes {
+		return
+	}
+	if managed && s.Person {
+		diags.AddAttributeError(path.Root("managed"), "A person cannot own a resource",
+			"The provider authenticates with username, so it is a person, and ligo refuses managed resources from a person. "+
+				"Set managed = false on the resource (or managed = false in the provider), or authenticate with a SPIFFE identity.")
+	}
+	if owner := stateOwner.ValueString(); exists && owner != "" && s.CallerID != "" && owner != s.CallerID {
+		diags.AddError("Managed by another automation",
+			fmt.Sprintf("The %s %s is managed by %s, not by this caller (%s). Two pipelines never change one resource: change it from its owner, "+
+				"or have a person release it.", strings.ToLower(kind), name, owner, s.CallerID))
+	}
+	if diags.HasError() {
+		return
+	}
+	if cr, found, same, err := s.pending(ctx, filing{kind: kind, name: name, payload: payload}); err == nil && found {
+		msg := fmt.Sprintf("Change request %s is pending for the %s, awaiting %s.", cr.Id, strings.ToLower(kind), awaiting(cr))
+		if same {
+			msg += " It asks for this very change: the apply waits for it and does not file another."
+		} else {
+			msg += " It asks for another change: the apply fails until a person decides it."
+		}
+		diags.AddWarning("A change request is pending", msg)
 	}
 }

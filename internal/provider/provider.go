@@ -84,9 +84,9 @@ func (p *Ligo) Configure(ctx context.Context, req provider.ConfigureRequest, res
 	resp.DataSourceData, resp.ResourceData = s, s
 }
 
-// Resources are what the provider writes: the sources so far (chunk 4a).
+// Resources are what the provider writes: sources and targets so far (chunk 4).
 func (p *Ligo) Resources(context.Context) []func() resource.Resource {
-	return []func() resource.Resource{newSourceResource}
+	return []func() resource.Resource{newSourceResource, newTargetResource}
 }
 
 // DataSources are the reads of chunk 2 (the instances come with chunk 3).
