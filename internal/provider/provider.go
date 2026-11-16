@@ -86,7 +86,7 @@ func (p *Ligo) Configure(ctx context.Context, req provider.ConfigureRequest, res
 
 // Resources are what the provider writes: sources and targets so far (chunk 4).
 func (p *Ligo) Resources(context.Context) []func() resource.Resource {
-	return []func() resource.Resource{newSourceResource, newTargetResource, newBindingResource, newIdentityProviderResource, newSecretStoreResource}
+	return []func() resource.Resource{newSourceResource, newTargetResource, newBindingResource, newIdentityProviderResource, newSecretStoreResource, newPlatformResource}
 }
 
 // DataSources are the reads of chunk 2 (the instances come with chunk 3).

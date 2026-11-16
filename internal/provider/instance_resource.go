@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
+	"time"
 
 	"github.com/dihedron/ligo/pkg/adminclient"
 	"github.com/dihedron/terraform-provider-ligo/internal/jsonnorm"
@@ -37,15 +39,31 @@ type instanceKind struct {
 	update   func(*adminclient.Client, context.Context, string, adminclient.Definition, int64, adminclient.Options) (adminclient.ChangeRequest, error)
 	retire   func(*adminclient.Client, context.Context, string, int64, adminclient.Options) (adminclient.ChangeRequest, error)
 	get      func(*adminclient.Client, context.Context, string) (adminclient.Instance, error)
+	model    func() instanceModeler      // a fresh model of the kind
+	extra    map[string]schema.Attribute // what the kind has besides the shared attributes
 }
+
+// instanceModeler is what the shared resource needs of a model: the shared part,
+// and the kind's own part of the request and of what ligo returns.
+type instanceModeler interface {
+	base() *instanceModel
+	extraBody(map[string]any)
+	fillExtra(*adminclient.Definition)
+}
+
+func (m *instanceModel) base() *instanceModel              { return m }
+func (m *instanceModel) extraBody(map[string]any)          {}
+func (m *instanceModel) fillExtra(*adminclient.Definition) {}
 
 var identityProviderKind = instanceKind{typeName: "identity_provider", defKind: "IdentityProvider", crKind: "IDENTITY_PROVIDER", what: "an identity provider instance: how the platforms know who a workload or a person is",
 	create: (*adminclient.Client).CreateIdentityProvider, update: (*adminclient.Client).UpdateIdentityProvider,
-	retire: (*adminclient.Client).RetireIdentityProvider, get: (*adminclient.Client).GetIdentityProvider}
+	retire: (*adminclient.Client).RetireIdentityProvider, get: (*adminclient.Client).GetIdentityProvider,
+	model: func() instanceModeler { return &instanceModel{} }}
 
 var secretStoreKind = instanceKind{typeName: "secret_store", defKind: "SecretStore", crKind: "SECRET_STORE", what: "a secret store instance: where the platforms keep the credentials they hand out",
 	create: (*adminclient.Client).CreateSecretStore, update: (*adminclient.Client).UpdateSecretStore,
-	retire: (*adminclient.Client).RetireSecretStore, get: (*adminclient.Client).GetSecretStore}
+	retire: (*adminclient.Client).RetireSecretStore, get: (*adminclient.Client).GetSecretStore,
+	model: func() instanceModeler { return &instanceModel{} }}
 
 type instanceResource struct {
 	session *Session
@@ -92,35 +110,37 @@ func (r *instanceResource) Metadata(_ context.Context, req resource.MetadataRequ
 func (r *instanceResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	keep := []planmodifier.String{stringplanmodifier.UseStateForUnknown()}
 	replace := []planmodifier.String{stringplanmodifier.RequiresReplace()}
+	attrs := map[string]schema.Attribute{
+		"id":           schema.StringAttribute{Computed: true, PlanModifiers: keep, Description: "The name."},
+		"name":         schema.StringAttribute{Required: true, PlanModifiers: replace, Description: "The name, unique among the instances of the kind; a new name is a new resource."},
+		"jurisdiction": schema.StringAttribute{Required: true, PlanModifiers: replace, Description: "The jurisdiction that owns it; a person on it decides every change. It cannot change."},
+		"realm":        schema.StringAttribute{Required: true, PlanModifiers: replace, Description: "The realm; it cannot change."},
+		"type":         schema.StringAttribute{Required: true, PlanModifiers: replace, Description: "The plugin type and version, as server.yaml names it (such as vault.v1); it cannot change."},
+		"display_name": schema.StringAttribute{Optional: true, Description: "A name for people."},
+		"description":  schema.StringAttribute{Optional: true, Description: "What it is."},
+		"contacts": schema.ListNestedAttribute{Optional: true, Description: "Who to ask.", NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
+			"name":  schema.StringAttribute{Required: true, Description: "A name or a team."},
+			"email": schema.StringAttribute{Optional: true, Description: "Their address."},
+		}}},
+		"svid_selector": schema.SingleNestedAttribute{Optional: true, Computed: true, PlanModifiers: []planmodifier.Object{objectplanmodifier.UseStateForUnknown()},
+			Description: "Which SVID is the plugin's, which the plugin process of the type has to present.",
+			Attributes: map[string]schema.Attribute{
+				"match_expr":        schema.StringAttribute{Required: true, Description: "The expression that selects the SVID."},
+				"jwt_audience":      schema.ListAttribute{Optional: true, ElementType: types.StringType, Description: "The audiences of the JWT-SVID it sends to the bootstrap credential's store."},
+				"allow_shared_svid": schema.BoolAttribute{Optional: true, Description: "Whether other instances of the type may share the SVID."},
+			}},
+		"config": schema.StringAttribute{Optional: true, Sensitive: true, PlanModifiers: []planmodifier.String{sameJSON{}},
+			Description: "The plugin's configuration, as JSON text (jsonencode); some plugins (svid, none) have none. ligo checks it against the plugin's schema when the change is filed. " +
+				"It names a bootstrap credential by reference (a store, a path), never by value."},
+		"network_flows":       schema.StringAttribute{Optional: true, PlanModifiers: []planmodifier.String{sameJSON{}}, Description: "The network flows the instance needs, as JSON text."},
+		"revision":            schema.Int64Attribute{Computed: true, Description: "The revision; an update names it, and ligo refuses a stale one."},
+		"last_change_request": schema.StringAttribute{Computed: true, Description: "The ID of the last change request the provider filed or waited for."},
+	}
+	maps.Copy(attrs, r.kind.extra)
 	resp.Schema = schema.Schema{
 		Description: "A " + r.kind.what + ". A person decides every change to it, whatever the charter says: the provider files the change request once and waits for " +
 			"it (approval_timeout in the provider), and never approves one. It is never managed (there is no lock). Its config names a credential by reference, never by value.",
-		Attributes: map[string]schema.Attribute{
-			"id":           schema.StringAttribute{Computed: true, PlanModifiers: keep, Description: "The name."},
-			"name":         schema.StringAttribute{Required: true, PlanModifiers: replace, Description: "The name, unique among the instances of the kind; a new name is a new resource."},
-			"jurisdiction": schema.StringAttribute{Required: true, PlanModifiers: replace, Description: "The jurisdiction that owns it; a person on it decides every change. It cannot change."},
-			"realm":        schema.StringAttribute{Required: true, PlanModifiers: replace, Description: "The realm; it cannot change."},
-			"type":         schema.StringAttribute{Required: true, PlanModifiers: replace, Description: "The plugin type and version, as server.yaml names it (such as vault.v1); it cannot change."},
-			"display_name": schema.StringAttribute{Optional: true, Description: "A name for people."},
-			"description":  schema.StringAttribute{Optional: true, Description: "What it is."},
-			"contacts": schema.ListNestedAttribute{Optional: true, Description: "Who to ask.", NestedObject: schema.NestedAttributeObject{Attributes: map[string]schema.Attribute{
-				"name":  schema.StringAttribute{Required: true, Description: "A name or a team."},
-				"email": schema.StringAttribute{Optional: true, Description: "Their address."},
-			}}},
-			"svid_selector": schema.SingleNestedAttribute{Optional: true, Computed: true, PlanModifiers: []planmodifier.Object{objectplanmodifier.UseStateForUnknown()},
-				Description: "Which SVID is the plugin's, which the plugin process of the type has to present.",
-				Attributes: map[string]schema.Attribute{
-					"match_expr":        schema.StringAttribute{Required: true, Description: "The expression that selects the SVID."},
-					"jwt_audience":      schema.ListAttribute{Optional: true, ElementType: types.StringType, Description: "The audiences of the JWT-SVID it sends to the bootstrap credential's store."},
-					"allow_shared_svid": schema.BoolAttribute{Optional: true, Description: "Whether other instances of the type may share the SVID."},
-				}},
-			"config": schema.StringAttribute{Optional: true, Sensitive: true, PlanModifiers: []planmodifier.String{sameJSON{}},
-				Description: "The plugin's configuration, as JSON text (jsonencode); some plugins (svid, none) have none. ligo checks it against the plugin's schema when the change is filed. " +
-					"It names a bootstrap credential by reference (a store, a path), never by value."},
-			"network_flows":       schema.StringAttribute{Optional: true, PlanModifiers: []planmodifier.String{sameJSON{}}, Description: "The network flows the instance needs, as JSON text."},
-			"revision":            schema.Int64Attribute{Computed: true, Description: "The revision; an update names it, and ligo refuses a stale one."},
-			"last_change_request": schema.StringAttribute{Computed: true, Description: "The ID of the last change request the provider filed or waited for."},
-		},
+		Attributes: attrs,
 	}
 }
 
@@ -138,7 +158,7 @@ func (r *instanceResource) Configure(_ context.Context, req resource.ConfigureRe
 
 // body is the definition as a request carries it: also what a pending request
 // of ours is recognised by, and what the typed definition is decoded from.
-func (m instanceModel) body(kind string) map[string]any {
+func (m *instanceModel) body(kind string) map[string]any {
 	meta := map[string]any{"name": m.Name.ValueString(), "jurisdiction": m.Jurisdiction.ValueString(), "realm": m.Realm.ValueString()}
 	if v := optStr(m.DisplayName); v != nil {
 		meta["displayName"] = *v
@@ -162,7 +182,7 @@ func (m instanceModel) body(kind string) map[string]any {
 	return b
 }
 
-func (m instanceModel) contacts() []any {
+func (m *instanceModel) contacts() []any {
 	var out []any
 	for _, e := range m.Contacts.Elements() {
 		a := e.(types.Object).Attributes()
@@ -175,7 +195,7 @@ func (m instanceModel) contacts() []any {
 	return out
 }
 
-func (m instanceModel) selector() map[string]any {
+func (m *instanceModel) selector() map[string]any {
 	if m.SvidSelector.IsNull() || m.SvidSelector.IsUnknown() {
 		return nil
 	}
@@ -190,8 +210,11 @@ func (m instanceModel) selector() map[string]any {
 	return sel
 }
 
-func (r *instanceResource) definition(m instanceModel) (adminclient.Definition, error) {
-	return decodeDefinition(m.body(r.kind.defKind))
+// bodyOf is the whole request body: the shared part and the kind's own.
+func (r *instanceResource) bodyOf(m instanceModeler) map[string]any {
+	b := m.base().body(r.kind.defKind)
+	m.extraBody(b)
+	return b
 }
 
 // fill sets what ligo holds. What a caller who may not file cannot see (the
@@ -243,30 +266,62 @@ func (m *instanceModel) fill(i adminclient.Instance) error {
 	return nil
 }
 
-func (r *instanceResource) readBack(ctx context.Context, m *instanceModel, cr string, diags *diag.Diagnostics) bool {
-	i, err := r.kind.get(r.session.Client, ctx, m.Name.ValueString())
+func (r *instanceResource) fill(m instanceModeler, i adminclient.Instance) error {
+	if err := m.base().fill(i); err != nil {
+		return err
+	}
+	if i.Definition != nil {
+		m.fillExtra(i.Definition)
+	}
+	return nil
+}
+
+// readBackWait is how long a change that was applied is read back while ligo
+// says the instance is unavailable: a platform's plugin is started or
+// reconfigured a moment after the approval, and a platform cannot be read
+// until it serves. A variable for the tests.
+var (
+	readBackWait = time.Minute
+	readBackStep = time.Second
+)
+
+func (r *instanceResource) readBack(ctx context.Context, m instanceModeler, cr string, diags *diag.Diagnostics) bool {
+	b := m.base()
+	deadline := time.Now().Add(readBackWait)
+	var i adminclient.Instance
+	var err error
+	for {
+		if i, err = r.kind.get(r.session.Client, ctx, b.Name.ValueString()); !errors.Is(err, adminclient.ErrUnavailable) || time.Now().After(deadline) || ctx.Err() != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(readBackStep):
+		}
+	}
 	if err == nil {
-		err = m.fill(i)
+		err = r.fill(m, i)
 	}
 	if err != nil {
 		diags.AddError("Cannot read the "+strings.ReplaceAll(r.kind.typeName, "_", " ")+" after the change", err.Error())
 		return false
 	}
-	m.LastChangeRequest = types.StringValue(cr)
+	b.LastChangeRequest = types.StringValue(cr)
 	return true
 }
 
 func (r *instanceResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var plan instanceModel
-	if resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...); resp.Diagnostics.HasError() {
+	plan := r.kind.model()
+	if resp.Diagnostics.Append(req.Plan.Get(ctx, plan)...); resp.Diagnostics.HasError() {
 		return
 	}
-	def, err := r.definition(plan)
+	body := r.bodyOf(plan)
+	def, err := decodeDefinition(body)
 	if err != nil {
 		resp.Diagnostics.AddError("Cannot build the request", err.Error())
 		return
 	}
-	cr, err := r.session.apply(ctx, filing{kind: r.kind.crKind, name: plan.Name.ValueString(), payload: plan.body(r.kind.defKind),
+	cr, err := r.session.apply(ctx, filing{kind: r.kind.crKind, name: plan.base().Name.ValueString(), payload: body,
 		file: func(ctx context.Context) (adminclient.ChangeRequest, error) {
 			return r.kind.create(r.session.Client, ctx, def, r.session.options(nil))
 		}})
@@ -274,36 +329,37 @@ func (r *instanceResource) Create(ctx context.Context, req resource.CreateReques
 		resp.Diagnostics.AddError("Cannot create the "+r.kind.typeName, err.Error())
 		return
 	}
-	if r.readBack(ctx, &plan, cr.Id.String(), &resp.Diagnostics) {
+	if r.readBack(ctx, plan, cr.Id.String(), &resp.Diagnostics) {
 		resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 	}
 }
 
 func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var st instanceModel
-	if resp.Diagnostics.Append(req.State.Get(ctx, &st)...); resp.Diagnostics.HasError() {
+	st := r.kind.model()
+	if resp.Diagnostics.Append(req.State.Get(ctx, st)...); resp.Diagnostics.HasError() {
 		return
 	}
-	i, err := r.kind.get(r.session.Client, ctx, st.Name.ValueString())
+	name := st.base().Name.ValueString()
+	i, err := r.kind.get(r.session.Client, ctx, name)
 	if errors.Is(err, adminclient.ErrNotFound) {
 		resp.State.RemoveResource(ctx)
 		return
 	}
 	if err != nil {
-		readError(&resp.Diagnostics, "ligo_"+r.kind.typeName+" "+st.Name.ValueString(), err)
+		readError(&resp.Diagnostics, "ligo_"+r.kind.typeName+" "+name, err)
 		return
 	}
 	if i.Quarantined != nil && *i.Quarantined {
 		resp.Diagnostics.AddWarning("The instance is quarantined", fmt.Sprintf("ligo isolated %s %s: its stored row does not verify, so it is not in force. "+
-			"The state is left as it is; a person looks at it, and a normal change request fixes it.", r.kind.typeName, st.Name.ValueString()))
+			"The state is left as it is; a person looks at it, and a normal change request fixes it.", r.kind.typeName, name))
 		resp.Diagnostics.Append(resp.State.Set(ctx, st)...)
 		return
 	}
 	if i.Definition == nil || i.Revision == nil {
 		resp.Diagnostics.AddWarning("The definition cannot be read", fmt.Sprintf("The caller may not file on the jurisdiction of %s %s, so ligo does not show its definition: "+
-			"the state keeps its config and its revision, and drift in them is not seen.", r.kind.typeName, st.Name.ValueString()))
+			"the state keeps its config and its revision, and drift in them is not seen.", r.kind.typeName, name))
 	}
-	if err := st.fill(i); err != nil {
+	if err := r.fill(st, i); err != nil {
 		resp.Diagnostics.AddError("Cannot read the "+r.kind.typeName, err.Error())
 		return
 	}
@@ -311,37 +367,39 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 }
 
 func (r *instanceResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan, st instanceModel
-	if resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...); resp.Diagnostics.HasError() {
+	plan, st := r.kind.model(), r.kind.model()
+	if resp.Diagnostics.Append(req.Plan.Get(ctx, plan)...); resp.Diagnostics.HasError() {
 		return
 	}
-	if resp.Diagnostics.Append(req.State.Get(ctx, &st)...); resp.Diagnostics.HasError() {
+	if resp.Diagnostics.Append(req.State.Get(ctx, st)...); resp.Diagnostics.HasError() {
 		return
 	}
-	def, err := r.definition(plan)
+	body := r.bodyOf(plan)
+	def, err := decodeDefinition(body)
 	if err != nil {
 		resp.Diagnostics.AddError("Cannot build the request", err.Error())
 		return
 	}
-	cr, err := r.session.apply(ctx, filing{kind: r.kind.crKind, name: plan.Name.ValueString(), payload: plan.body(r.kind.defKind),
+	name, rev := plan.base().Name.ValueString(), st.base().Revision.ValueInt64()
+	cr, err := r.session.apply(ctx, filing{kind: r.kind.crKind, name: name, payload: body,
 		file: func(ctx context.Context) (adminclient.ChangeRequest, error) {
-			return r.kind.update(r.session.Client, ctx, plan.Name.ValueString(), def, st.Revision.ValueInt64(), r.session.options(nil))
+			return r.kind.update(r.session.Client, ctx, name, def, rev, r.session.options(nil))
 		}})
 	if err != nil {
 		resp.Diagnostics.AddError("Cannot update the "+r.kind.typeName, err.Error())
 		return
 	}
-	if r.readBack(ctx, &plan, cr.Id.String(), &resp.Diagnostics) {
+	if r.readBack(ctx, plan, cr.Id.String(), &resp.Diagnostics) {
 		resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 	}
 }
 
 func (r *instanceResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var st instanceModel
-	if resp.Diagnostics.Append(req.State.Get(ctx, &st)...); resp.Diagnostics.HasError() {
+	st := r.kind.model()
+	if resp.Diagnostics.Append(req.State.Get(ctx, st)...); resp.Diagnostics.HasError() {
 		return
 	}
-	name, rev := st.Name.ValueString(), st.Revision.ValueInt64()
+	name, rev := st.base().Name.ValueString(), st.base().Revision.ValueInt64()
 	if _, err := r.session.stateChange(ctx, r.kind.crKind, name, func(ctx context.Context) (adminclient.ChangeRequest, error) {
 		return r.kind.retire(r.session.Client, ctx, name, rev, r.session.options(nil))
 	}); err != nil {
@@ -357,29 +415,30 @@ func (r *instanceResource) ImportState(ctx context.Context, req resource.ImportS
 // ModifyPlan: a reformatting is no change, and a request that is still open is
 // told. Nothing else is checked here: ligo checks the config against the
 // plugin's schema when the change is filed, and the provider has no way to
-// read that schema.
+// read that schema; it checks the wiring of a platform at the approval.
 func (r *instanceResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.Plan.Raw.IsNull() || r.session == nil {
 		return
 	}
-	var plan, st instanceModel
-	if resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...); resp.Diagnostics.HasError() {
+	plan, st := r.kind.model(), r.kind.model()
+	if resp.Diagnostics.Append(req.Plan.Get(ctx, plan)...); resp.Diagnostics.HasError() {
 		return
 	}
+	body := r.bodyOf(plan)
 	if !req.State.Raw.IsNull() {
-		if resp.Diagnostics.Append(req.State.Get(ctx, &st)...); resp.Diagnostics.HasError() {
+		if resp.Diagnostics.Append(req.State.Get(ctx, st)...); resp.Diagnostics.HasError() {
 			return
 		}
-		same := plan
-		same.Revision, same.LastChangeRequest = st.Revision, st.LastChangeRequest
+		// the framework marks what ligo computes as unknown when a JSON text was only reformatted
+		plan.base().Revision, plan.base().LastChangeRequest = st.base().Revision, st.base().LastChangeRequest
 		np := tfsdk.Plan{Schema: req.Plan.Schema}
-		if !np.Set(ctx, same).HasError() && np.Raw.Equal(req.State.Raw) {
+		if !np.Set(ctx, plan).HasError() && np.Raw.Equal(req.State.Raw) {
 			resp.Plan = np
 			return
 		}
 	}
 	if req.State.Raw.IsNull() || !req.State.Raw.Equal(resp.Plan.Raw) {
-		r.session.warnPending(ctx, r.kind.crKind, plan.Name.ValueString(), plan.body(r.kind.defKind), &resp.Diagnostics)
+		r.session.warnPending(ctx, r.kind.crKind, plan.base().Name.ValueString(), body, &resp.Diagnostics)
 	}
 }
 

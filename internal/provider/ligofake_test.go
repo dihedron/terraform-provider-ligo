@@ -34,6 +34,7 @@ type ligoFake struct {
 	inUse        map[string]bool           // instances that cannot be retired
 	viewer       bool                      // the caller may not file on instances: no definition, no revision
 	quarantined  map[string]bool
+	unavailable  int               // GETs of an instance that answer 503 (its plugin is not serving yet)
 	held         map[string]bool   // bindings that a hold stops from being created
 	breakGlass   map[string]string // bindings under a break-glass review, with its change request
 	provisioning int               // GETs of a new binding that say PROVISIONING before ACTIVE
