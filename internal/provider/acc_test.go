@@ -296,3 +296,65 @@ func (noChange) CheckPlan(_ context.Context, req plancheck.CheckPlanRequest, res
 		resp.Error = fmt.Errorf("%s would change: %s", rc.Address, b)
 	}
 }
+
+// TestAccBindingLifecycle: a source, a target and the binding between them in
+// one configuration; the binding goes after both and is revoked before them.
+func TestAccBindingLifecycle(t *testing.T) {
+	l := newLigoFake(t)
+	l.on("GET /v1/admin/platforms/pg", 200, `{"apiVersion":"v","kind":"Platform","name":"pg","jurisdiction":"dc/corp-prod","realm":"prod","identityProvider":{"instance":"i","type":"t"},
+		"secretStore":{"instance":"s","type":"t"},"allowedSourceTrustDomains":[],"networkFlows":[],"uiSchemas":{"bindingParameters":{"fields":[{"jsonKey":"connectionLimit","fieldType":"UI_FIELD_TYPE_NUMBER"}]},`+
+		pgFormsJSON[1:]+`}`)
+	cfg := func(params, purpose string) string {
+		return l.hcl(t, fmt.Sprintf(`
+resource "ligo_source" "app" {
+  name         = "ledger-app"
+  trust_domain = "prod.example.org"
+  svid_regex   = "^spiffe://prod\\.example\\.org/ns/fin/sa/.*$"
+  managed      = false
+}
+resource "ligo_target" "db" {
+  name          = "ledger-db"
+  platform      = "pg"
+  jurisdiction  = "dc/corp-prod/ledger"
+  definition    = jsonencode({ database = "ledger", schema = "ledger" })
+  access_levels = { read = { grants = jsonencode({ roles = ["RO"] }) } }
+  managed       = false
+}
+resource "ligo_binding" "b" {
+  name         = "ledger-app-reads-ledger-db"
+  source       = ligo_source.app.name
+  target       = ligo_target.db.name
+  access_level = "read"
+  parameters   = %s
+  purpose      = %q
+  managed      = false
+}
+`, params, purpose))
+	}
+	tight := `jsonencode({ connectionLimit = 5 })`
+	loose := `"{ \"connectionLimit\": 5 }"`
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6,
+		Steps: []resource.TestStep{
+			{Config: cfg(tight, "reports"), Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("ligo_binding.b", "phase", "ACTIVE"),
+				resource.TestCheckResourceAttr("ligo_binding.b", "revision", "1"),
+				resource.TestCheckResourceAttr("ligo_binding.b", "source", "ledger-app"),
+			)},
+			{Config: cfg(loose, "reports"), ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{noChange{}}}}, // a reformatting is no diff
+			{Config: cfg(`jsonencode({ connectionLimit = 9 })`, "reports"), Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("ligo_binding.b", "revision", "2"),
+				resource.TestCheckResourceAttr("ligo_binding.b", "parameters", `{"connectionLimit":9}`),
+			)},
+			{Config: cfg(`jsonencode({ connectionLimit = "many" })`, "reports"), ExpectError: regexp.MustCompile(`(?s)connectionLimit`)},
+			{ResourceName: "ligo_binding.b", ImportState: true, ImportStateId: "ledger-app-reads-ledger-db", ImportStateVerify: true, ImportStateVerifyIdentifierAttribute: "name",
+				ImportStateVerifyIgnore: []string{"managed", "last_change_request"}},
+		},
+	})
+	if len(l.bindings) != 0 {
+		t.Error("destroy must revoke the binding")
+	}
+	if l.targets["ledger-db"]["metadata"].(map[string]any)["state"] != "RETIRED" || l.sources["ledger-app"]["metadata"].(map[string]any)["state"] != "RETIRED" {
+		t.Error("destroy must retire the source and the target, after the binding")
+	}
+}

@@ -18,11 +18,12 @@ import (
 // fake is an admin API with canned answers, over TLS, that records requests.
 type fake struct {
 	*httptest.Server
-	mu       sync.Mutex
-	routes   map[string]func(r *http.Request) (int, string) // "GET /v1/admin/sources"
-	prefix   map[string]func(r *http.Request) (int, string) // "GET /v1/admin/change-requests/": by the start of the path
-	requests []string                                       // method, path and query of each request
-	ca       string
+	mu         sync.Mutex
+	routes     map[string]func(r *http.Request) (int, string) // "GET /v1/admin/sources"
+	prefix     map[string]func(r *http.Request) (int, string) // "GET /v1/admin/change-requests/": by the start of the path
+	requests   []string                                       // method, path and query of each request
+	ca         string
+	retryAfter string // the Retry-After header of a 429
 }
 
 func newFake(t *testing.T) *fake {
@@ -51,6 +52,9 @@ func newFake(t *testing.T) *fake {
 			w.Header().Set("Content-Type", "application/problem+json")
 		} else {
 			w.Header().Set("Content-Type", "application/json")
+		}
+		if code == http.StatusTooManyRequests && f.retryAfter != "" {
+			w.Header().Set("Retry-After", f.retryAfter)
 		}
 		w.WriteHeader(code)
 		_, _ = w.Write([]byte(body))

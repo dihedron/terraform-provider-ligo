@@ -7,7 +7,6 @@ import (
 	"os"
 	"regexp"
 	"testing"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
@@ -153,12 +152,9 @@ func TestLabPending(t *testing.T) {
 
 // TestLabTarget runs as the pipeline: a target on the lab's pg-ledger platform
 // with its access levels added, deprecated and retired, checked against the
-// platform's form before anything is filed.
-// pace waits for ligo's per-principal rate limit (10 requests a second, burst
-// 20) to refill: a provider run is chatty, and the provider does not retry a
-// write that was refused.
-func pace() { time.Sleep(2 * time.Second) }
-
+// platform's form before anything is filed. A long run meets ligo's rate limit
+// (10 requests a second): the provider's bounded retry of a refused filing
+// absorbs it.
 func TestLabTarget(t *testing.T) {
 	suffix := labEnv(t, "LIGO_E2E_SUFFIX")
 	owner := labEnv(t, "LIGO_LAB_OWNER")
@@ -187,18 +183,70 @@ resource "ligo_target" "t" {
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: protoV6,
 		Steps: []resource.TestStep{
-			{PreConfig: pace, Config: cfg(def, read, ""), Check: resource.ComposeAggregateTestCheckFunc(
+			{Config: cfg(def, read, ""), Check: resource.ComposeAggregateTestCheckFunc(
 				resource.TestCheckResourceAttr("ligo_target.t", "managed_by", owner),
 				resource.TestCheckResourceAttr("ligo_target.t", "access_levels.read.state", "ACTIVE"),
 				resource.TestCheckResourceAttr("ligo_target.t", "revision", "1"),
 			)},
-			{PreConfig: pace, Config: cfg(def, read, ""), PlanOnly: true},
-			{PreConfig: pace, Config: cfg(def, read+"\n"+write, ""), Check: resource.TestCheckResourceAttr("ligo_target.t", "access_levels.write.state", "ACTIVE")},
-			{PreConfig: pace, Config: cfg(def, read+"\n"+writeOld, ""), Check: resource.TestCheckResourceAttr("ligo_target.t", "access_levels.write.state", "DEPRECATED")},
-			{PreConfig: pace, Config: cfg(def, read, ""), Check: resource.TestCheckNoResourceAttr("ligo_target.t", "access_levels.write.grants")},
-			{PreConfig: pace, Config: cfg(`jsonencode({ database = "ledger", schema = "ledger", password = "hunter2" })`, read, ""), ExpectError: regexp.MustCompile(`(?s)password is not a field`)},
-			{PreConfig: pace, Config: cfg(def, read, "managed = false"), Check: resource.TestCheckNoResourceAttr("ligo_target.t", "managed_by")},
-			{PreConfig: pace, ResourceName: "ligo_target.t", ImportState: true, ImportStateId: name, ImportStateVerify: true, ImportStateVerifyIdentifierAttribute: "name",
+			{Config: cfg(def, read, ""), PlanOnly: true},
+			{Config: cfg(def, read+"\n"+write, ""), Check: resource.TestCheckResourceAttr("ligo_target.t", "access_levels.write.state", "ACTIVE")},
+			{Config: cfg(def, read+"\n"+writeOld, ""), Check: resource.TestCheckResourceAttr("ligo_target.t", "access_levels.write.state", "DEPRECATED")},
+			{Config: cfg(def, read, ""), Check: resource.TestCheckNoResourceAttr("ligo_target.t", "access_levels.write.grants")},
+			{Config: cfg(`jsonencode({ database = "ledger", schema = "ledger", password = "hunter2" })`, read, ""), ExpectError: regexp.MustCompile(`(?s)password is not a field`)},
+			{Config: cfg(def, read, "managed = false"), Check: resource.TestCheckNoResourceAttr("ligo_target.t", "managed_by")},
+			{ResourceName: "ligo_target.t", ImportState: true, ImportStateId: name, ImportStateVerify: true, ImportStateVerifyIdentifierAttribute: "name",
+				ImportStateVerifyIgnore: []string{"managed", "last_change_request"}},
+		},
+	})
+}
+
+// TestLabBinding runs as the pipeline: a source, a target and the binding
+// between them, which is provisioned for real (ACTIVE), changed, and revoked
+// when the test ends. A hold is not made here: only a person can contain a
+// binding, which the unit tests cover and ligo's own e2e (serve test-managed)
+// proves against the real server.
+func TestLabBinding(t *testing.T) {
+	suffix := labEnv(t, "LIGO_E2E_SUFFIX")
+	owner := labEnv(t, "LIGO_LAB_OWNER")
+	cfg := func(limit int) string {
+		return labProvider(t, "3m") + fmt.Sprintf(`
+resource "ligo_source" "s" {
+  name         = "iac-bs-%[1]s"
+  trust_domain = "prod.lab"
+  svid_regex   = "^spiffe://prod\\.lab/ns/climg/sa/wb%[1]s$"
+}
+resource "ligo_target" "t" {
+  name          = "iac-bt-%[1]s"
+  platform      = "pg-ledger"
+  jurisdiction  = "dc/corp-prod/ledger"
+  definition    = jsonencode({ database = "ledger", schema = "ledger" })
+  access_levels = { read = { grants = jsonencode({ roles = ["LEDGER_RO_ROLE"] }) } }
+  network_flows = jsonencode([{ name = "ledger", purpose = "DATA", protocol = "TCP", destination = "pg.ligo.lab", ports = [5432], tls = true, serverName = "pg.ligo.lab" }])
+}
+resource "ligo_binding" "b" {
+  name         = "iac-b-%[1]s"
+  source       = ligo_source.s.name
+  target       = ligo_target.t.name
+  access_level = "read"
+  purpose      = "provider lab"
+  parameters   = jsonencode({ connectionLimit = %[2]d })
+}
+`, suffix, limit)
+	}
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6,
+		Steps: []resource.TestStep{
+			{Config: cfg(5), Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("ligo_binding.b", "phase", "ACTIVE"),
+				resource.TestCheckResourceAttr("ligo_binding.b", "managed_by", owner),
+				resource.TestCheckResourceAttr("ligo_binding.b", "revision", "1"),
+			)},
+			{Config: cfg(5), PlanOnly: true},
+			{Config: cfg(9), Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("ligo_binding.b", "phase", "ACTIVE"),
+				resource.TestCheckResourceAttr("ligo_binding.b", "parameters", `{"connectionLimit":9}`),
+			)},
+			{ResourceName: "ligo_binding.b", ImportState: true, ImportStateId: "iac-b-" + suffix, ImportStateVerify: true, ImportStateVerifyIdentifierAttribute: "name",
 				ImportStateVerifyIgnore: []string{"managed", "last_change_request"}},
 		},
 	})
