@@ -1,0 +1,5 @@
+# Setup Guide: title page and PDF metadata (see manuals/build.sh)
+title: "Setup Guide"
+subtitle: "Installing and configuring the ligo provider for Terraform and OpenTofu"
+author: "terraform-provider-ligo"
+lang: en-GB

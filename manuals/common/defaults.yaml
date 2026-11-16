@@ -1,0 +1,50 @@
+# pandoc defaults shared by the documents (see manuals/build.sh and
+# .specs/ligo-terraform-provider.md). Paths are relative to the repository
+# root, where the build runs.
+from: markdown
+to: pdf
+template: eisvogel
+pdf-engine: xelatex
+standalone: true
+number-sections: true
+top-level-division: chapter
+fail-if-warnings: true
+# diagrams rendered by the build, artwork
+resource-path: [".", "build/manuals/work/diagrams", "manuals/common/artwork"]
+filters:
+  - manuals/common/filters/include.lua
+  - manuals/common/filters/landscape.lua
+  - manuals/common/filters/breakcode.lua
+variables:
+  # a book (scrbook) for chapters, printed one-sided
+  book: true
+  classoption: [oneside, open=any]
+  papersize: a4
+  fontsize: 10pt
+  mainfont: DejaVu Serif
+  sansfont: DejaVu Sans
+  monofont: DejaVu Sans Mono
+  colorlinks: true
+  linkcolor: blue
+  urlcolor: blue
+  titlepage: true
+  titlepage-logo: manuals/common/artwork/logo.png
+  logo-width: 70mm
+  titlepage-rule-color: "1E4E79"
+  toc-own-page: true
+  footer-left: "terraform-provider-ligo"
+  code-block-font-size: \small
+  table-use-row-colors: true
+  # a description list's text starts below its term: the configuration
+  # reference's keys are easier to scan. A landscape div's pages
+  # (landscape.lua) are turned by lscape and shown upright by viewers through
+  # their /Rotate, as pdflscape would (not in the image) under XeLaTeX
+  header-includes: |
+    \usepackage{enumitem}
+    \usepackage{needspace}
+    \usepackage{lscape}
+    \newif\iflandscapepage
+    \AddToHook{shipout/background}{\iflandscapepage\put(0,0){\special{pdf: put @thispage <</Rotate 90>>}}\fi}
+    \setlist[description]{style=nextline, leftmargin=1.5em}
+    % appendices (the planning guide): no trailing dot on section numbers once one has a letter
+    \KOMAoptions{numbers=noenddot}

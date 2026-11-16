@@ -1,0 +1,28 @@
+---
+page_title: "{{ .RenderedProviderName }} Provider"
+description: |-
+  {{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{ .RenderedProviderName }} Provider
+
+{{ .Description | trimspace }}
+
+The provider manages the resources of [ligo](https://github.com/dihedron/ligo), the SPIFFE binding lifecycle service: sources, targets, bindings, and the platforms, identity providers and secret stores that serve them. It works the same with Terraform and with OpenTofu.
+
+## How it works
+
+- **Every change is a change request.** The provider files it once and waits for it. It never approves, declines or ratifies anything: that is people's work, and the provider has no call that does it.
+- **A run can wait.** A pipeline that is trusted automation (a SPIFFE identity registered as such) is approved by delegation, with `approval_reference`. A person, and every change to a platform, an identity provider or a secret store, waits for an approver; the apply ends at `approval_timeout` with the request still open, and the next apply waits for that same request instead of filing another.
+- **The lock.** What the provider files for trusted automation is *managed*: only that automation changes it, and people cannot (except a binding, through break-glass). `managed = false` on a resource releases it.
+- **Nothing secret is stored.** No attribute holds a password or a token; an instance's `config` names its credentials by reference and is sensitive.
+
+## Versions
+
+The provider supports the `ligo` version whose client it is built with (v0.7.0) and the next minor version. A `ligo` that is too old or too new for a call answers with a problem, which the provider shows as it is.
+
+## Example Usage
+
+{{ tffile "../../examples/provider/provider.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}

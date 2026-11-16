@@ -27,9 +27,14 @@ compile: lint go-dev ## build for the default linux/amd64 platform
 snapshot: signing-check lint go-snapshot ## build a snapshot version for the supported platforms (signed if GPG_FINGERPRINT is set)
 
 .PHONY: release
-release: signing-check lint ## build a release version (requires a valid tag and the signing key)
+release: signing-check lint ## build a release version (requires a valid tag and the signing key), guides included
 	@test -n "$(GPG_FINGERPRINT)" || { echo "a release must be signed: set GPG_FINGERPRINT" >&2; exit 1; }
+	@MANUALS_VERSION="$$(git describe --tags --exact-match)" manuals/build.sh
 	@$(MAKE) --no-print-directory go-release
+
+.PHONY: manuals
+manuals: ## build the PDF guides into build/manuals/ (needs docker or podman)
+	@manuals/build.sh
 
 # signing-check: the Terraform and OpenTofu registries require the checksums
 # file to be signed with a GPG key whose public half is registered with them
@@ -97,3 +102,15 @@ vuln: ## check go.mod and the code for known vulnerabilities with govulncheck (r
 	go run golang.org/x/vuln/cmd/govulncheck@latest -C cmd/terraform-provider-ligo -scan module || rc=1; \
 	go run golang.org/x/vuln/cmd/govulncheck@latest ./... || rc=1; \
 	exit $$rc
+
+# the registry reference (docs/) is generated from the schemas and the
+# examples; the registries read it
+.PHONY: registry-docs
+registry-docs: ## generate the registry reference (docs/) with tfplugindocs (it fetches a Terraform binary)
+	@go tool tfplugindocs generate --provider-name ligo --rendered-provider-name ligo \
+		--provider-dir cmd/terraform-provider-ligo --examples-dir ../../examples --rendered-website-dir ../../docs --website-source-dir ../../templates
+
+.PHONY: registry-docs-check
+registry-docs-check: registry-docs ## check that docs/ is what the schemas and examples generate
+	@git diff --exit-code -- docs || { echo "docs/ is not up to date: run make registry-docs and commit it" >&2; exit 1; }
+	@test -z "$$(git ls-files --others --exclude-standard docs)" || { echo "docs/ has files that are not committed: run make registry-docs and commit them" >&2; exit 1; }
