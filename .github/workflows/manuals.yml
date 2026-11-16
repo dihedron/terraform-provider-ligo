@@ -1,0 +1,43 @@
+name: Manuals
+
+# Builds the PDF guides on every change that can affect them, so that a guide
+# that does not build is caught before a release, and attaches the PDFs to the
+# run for review. Releases build them again with the release version (make
+# release).
+
+on:
+  push:
+    paths:
+      - "manuals/**"
+      - "docs/**"
+      - ".github/workflows/manuals.yml"
+  pull_request:
+    paths:
+      - "manuals/**"
+      - "docs/**"
+      - ".github/workflows/manuals.yml"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+
+jobs:
+  guides:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # git describe stamps the version
+
+      - name: Build the guides
+        run: manuals/build.sh
+
+      - name: Attach the guides to the run
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: guides
+          path: build/manuals/*.pdf
+          if-no-files-found: error

@@ -66,6 +66,11 @@ jobs:
       - name: Lint and build
         run: make
 
+      # the registry reference is generated from the schemas and the examples
+      # (tfplugindocs fetches a Terraform binary): it must be committed as is
+      - name: Check the registry reference
+        run: make registry-docs-check
+
       - name: Test with coverage
         run: go test -count=1 ./... -coverpkg=./... -coverprofile=coverage.txt
 

@@ -1,0 +1,5 @@
+# Architecture and Design Guide: title page and PDF metadata (see manuals/build.sh)
+title: "Architecture and Design"
+subtitle: "How the ligo provider changes ligo, and why it is safe"
+author: "terraform-provider-ligo"
+lang: en-GB

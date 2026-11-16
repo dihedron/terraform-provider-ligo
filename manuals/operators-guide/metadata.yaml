@@ -1,0 +1,5 @@
+# Operator's Guide: title page and PDF metadata (see manuals/build.sh)
+title: "Operator's Guide"
+subtitle: "Running pipelines with the ligo provider"
+author: "terraform-provider-ligo"
+lang: en-GB

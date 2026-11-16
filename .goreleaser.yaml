@@ -77,6 +77,9 @@ release:
   extra_files:
     - glob: terraform-registry-manifest.json
       name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
+    # the PDF guides (make release builds them first): extra assets, not part
+    # of the signed checksums, which the registries read
+    - glob: ./build/manuals/*.pdf
 
 changelog:
   sort: asc

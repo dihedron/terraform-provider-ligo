@@ -18,12 +18,18 @@ terraform {
 
 One provider serves both Terraform and OpenTofu.
 
+## Documentation
+
+The registry reference is in [docs/](docs/). The Setup Guide, the Operator's Guide and the Architecture and Design Guide are written in [manuals/](manuals/) and attached to each release as PDF.
+
 ## Build, test, lint
 
 ```bash
 make            # lint and build
 go test ./...   # unit tests
 make acceptance # acceptance tests, against a lab ligo
+make registry-docs # the registry reference (docs/), from the schemas
+make manuals    # the PDF guides (manuals/) into build/manuals/; needs docker or podman
 make help       # every target
 ```
 
