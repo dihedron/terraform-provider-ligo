@@ -208,6 +208,8 @@ func writeError(f filing, err error) error {
 	case errors.Is(err, adminclient.ErrState) && problemSlug(err) == "resource-held":
 		return fmt.Errorf("%s is held: a person removed it in an emergency and a person lifts the hold (ligo hold list, ligo hold lift) after reviewing it. "+
 			"The provider never lifts a hold and does not file again until then: %w", what, err)
+	case errors.Is(err, adminclient.ErrState) && problemSlug(err) == "instance-in-use":
+		return fmt.Errorf("%s is still used (by targets, bindings or a platform): retire what uses it first: %w", what, err)
 	case errors.Is(err, adminclient.ErrState) && problemSlug(err) == "break-glass-open":
 		return fmt.Errorf("%s has an open break-glass change, which a person must have reviewed before ligo takes another change; the request is named below. "+
 			"The provider does not file over it: %w", what, err)
@@ -256,6 +258,11 @@ func (s *Session) lockChecks(ctx context.Context, kind, name string, managed boo
 	if diags.HasError() {
 		return
 	}
+	s.warnPending(ctx, kind, name, payload, diags)
+}
+
+// warnPending tells a request that is still open for the resource (T-P6).
+func (s *Session) warnPending(ctx context.Context, kind, name string, payload map[string]any, diags *diag.Diagnostics) {
 	if cr, found, same, err := s.pending(ctx, filing{kind: kind, name: name, payload: payload}); err == nil && found {
 		msg := fmt.Sprintf("Change request %s is pending for the %s, awaiting %s.", cr.Id, strings.ToLower(kind), awaiting(cr))
 		if same {

@@ -19,7 +19,7 @@ import (
 // that the list is what a reviewer reads.
 var allowedCalls = []string{
 	"GetSource", "ListSources", "GetTarget", "ListTargets", "GetBinding", "ListBindings", "GetPlatform", "ListPlatforms",
-	"SearchCatalog", "GetCatalogTarget", "GetCharter", "ListHolds", "CreateBinding", "UpdateBinding", "DeleteBinding", "CreateTarget", "UpdateTarget", "DeprecateTarget", "ReactivateTarget", "RetireTarget", "DeprecateAccessLevel", "ReactivateAccessLevel", "RetireAccessLevel", "CreateSource", "UpdateSource", "DeprecateSource", "ReactivateSource", "RetireSource", "WaitChangeRequest", "ListChangeRequests", "GetChangeRequest", "GetIdentityProvider", "ListIdentityProviders", "GetSecretStore", "ListSecretStores",
+	"SearchCatalog", "GetCatalogTarget", "GetCharter", "ListHolds", "CreateIdentityProvider", "UpdateIdentityProvider", "RetireIdentityProvider", "CreateSecretStore", "UpdateSecretStore", "RetireSecretStore", "CreateBinding", "UpdateBinding", "DeleteBinding", "CreateTarget", "UpdateTarget", "DeprecateTarget", "ReactivateTarget", "RetireTarget", "DeprecateAccessLevel", "ReactivateAccessLevel", "RetireAccessLevel", "CreateSource", "UpdateSource", "DeprecateSource", "ReactivateSource", "RetireSource", "WaitChangeRequest", "ListChangeRequests", "GetChangeRequest", "GetIdentityProvider", "ListIdentityProviders", "GetSecretStore", "ListSecretStores",
 }
 
 // decisionWords are what no method the provider calls may start with: the

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // ligoFake is a ligo that keeps sources and change requests: a filing makes a
@@ -28,17 +29,22 @@ type ligoFake struct {
 	owner        string
 	serial       int
 	bindings     map[string]map[string]any // by name
-	held         map[string]bool           // bindings that a hold stops from being created
-	breakGlass   map[string]string         // bindings under a break-glass review, with its change request
-	provisioning int                       // GETs of a new binding that say PROVISIONING before ACTIVE
-	failing      bool                      // a binding ends FAILED
-	refuse       map[int]int               // a status to answer to the next n filings, before they are processed (429, 503)
-	attempts     int                       // every POST and PUT that arrived, filed or refused
+	instances    map[string]map[string]any // by kind and name ("IDENTITY_PROVIDER/vault-prod")
+	approveIn    time.Duration             // an instance request is approved by a person after this long (0: it stays pending)
+	inUse        map[string]bool           // instances that cannot be retired
+	viewer       bool                      // the caller may not file on instances: no definition, no revision
+	quarantined  map[string]bool
+	held         map[string]bool   // bindings that a hold stops from being created
+	breakGlass   map[string]string // bindings under a break-glass review, with its change request
+	provisioning int               // GETs of a new binding that say PROVISIONING before ACTIVE
+	failing      bool              // a binding ends FAILED
+	refuse       map[int]int       // a status to answer to the next n filings, before they are processed (429, 503)
+	attempts     int               // every POST and PUT that arrived, filed or refused
 }
 
 func newLigoFake(t *testing.T) *ligoFake {
 	t.Helper()
-	l := &ligoFake{fake: newFake(t), immediate: true, bindings: map[string]map[string]any{}, held: map[string]bool{}, breakGlass: map[string]string{}, sources: map[string]map[string]any{}, targets: map[string]map[string]any{}, crs: map[string]map[string]any{}, owner: "spiffe://prod.example.org/ci/terraform"}
+	l := &ligoFake{fake: newFake(t), immediate: true, bindings: map[string]map[string]any{}, instances: map[string]map[string]any{}, inUse: map[string]bool{}, quarantined: map[string]bool{}, held: map[string]bool{}, breakGlass: map[string]string{}, sources: map[string]map[string]any{}, targets: map[string]map[string]any{}, crs: map[string]map[string]any{}, owner: "spiffe://prod.example.org/ci/terraform"}
 	handle := func(route string, h func(r *http.Request) (int, string)) {
 		l.fake.mu.Lock()
 		l.routes[route] = h
@@ -47,6 +53,9 @@ func newLigoFake(t *testing.T) *ligoFake {
 	handle("POST /v1/admin/sources", func(r *http.Request) (int, string) { return l.change(r, "SOURCE", "", "CREATE", "") })
 	handle("POST /v1/admin/targets", func(r *http.Request) (int, string) { return l.change(r, "TARGET", "", "CREATE", "") })
 	handle("POST /v1/admin/bindings", func(r *http.Request) (int, string) { return l.change(r, "BINDING", "", "CREATE", "") })
+	for typ, base := range instanceBases {
+		handle("POST "+base, func(r *http.Request) (int, string) { return l.change(r, typ, "", "CREATE", "") })
+	}
 	handle("GET /v1/admin/change-requests", l.listCRs)
 	l.serveCR()
 	return l
@@ -110,6 +119,9 @@ func (l *ligoFake) change(r *http.Request, typ, name, op, level string) (int, st
 	if typ == "BINDING" {
 		return l.bindingChange(r, name, op, body)
 	}
+	if _, ok := instanceBases[typ]; ok {
+		return l.instanceChange(r, typ, name, op, body)
+	}
 	if name == "" {
 		name = body["metadata"].(map[string]any)["name"].(string)
 		l.route(typ, name)
@@ -162,6 +174,10 @@ func (l *ligoFake) apply(id string) {
 	body, _ := cr["payload"].(map[string]any)
 	if typ == "BINDING" {
 		l.applyBinding(name, op, body)
+		return
+	}
+	if _, ok := instanceBases[typ]; ok {
+		l.applyInstance(typ, name, op, body)
 		return
 	}
 	store := l.sources
