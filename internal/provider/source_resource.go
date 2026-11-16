@@ -230,10 +230,9 @@ func (r *sourceResource) setState(ctx context.Context, m *sourceModel, to string
 	if to == "DEPRECATED" {
 		call = r.session.Client.DeprecateSource
 	}
-	cr, err := r.session.apply(ctx, filing{kind: "SOURCE", name: name, payload: nil,
-		file: func(ctx context.Context) (adminclient.ChangeRequest, error) {
-			return call(ctx, name, rev, r.session.options(nil)) // a state change carries no lock
-		}})
+	cr, err := r.session.stateChange(ctx, "SOURCE", name, func(ctx context.Context) (adminclient.ChangeRequest, error) {
+		return call(ctx, name, rev, r.session.options(nil))
+	})
 	if err != nil {
 		diags.AddError("Cannot change the state of the source", err.Error())
 		return
@@ -360,37 +359,12 @@ func (r *sourceResource) ModifyPlan(ctx context.Context, req resource.ModifyPlan
 	if resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...); resp.Diagnostics.HasError() {
 		return
 	}
-	changes := req.State.Raw.IsNull() || !req.State.Raw.Equal(req.Plan.Raw)
-	if !changes {
-		return
-	}
-	if plan.effectiveManaged(r.session) && r.session.Person {
-		resp.Diagnostics.AddAttributeError(path.Root("managed"), "A person cannot own a resource",
-			"The provider authenticates with username, so it is a person, and ligo refuses managed resources from a person. "+
-				"Set managed = false on the resource (or managed = false in the provider), or authenticate with a SPIFFE identity.")
-	}
+	var st sourceModel
 	if !req.State.Raw.IsNull() {
-		var st sourceModel
 		if resp.Diagnostics.Append(req.State.Get(ctx, &st)...); resp.Diagnostics.HasError() {
 			return
 		}
-		if owner := st.ManagedBy.ValueString(); owner != "" && r.session.CallerID != "" && owner != r.session.CallerID {
-			resp.Diagnostics.AddError("Managed by another automation",
-				fmt.Sprintf("The source %s is managed by %s, not by this caller (%s). Two pipelines never change one resource: change it from its owner, "+
-					"or have a person release it.", st.Name.ValueString(), owner, r.session.CallerID))
-		}
 	}
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	f := filing{kind: "SOURCE", name: plan.Name.ValueString(), payload: plan.body()}
-	if cr, found, same, err := r.session.pending(ctx, f); err == nil && found {
-		msg := fmt.Sprintf("Change request %s is pending for the source, awaiting %s.", cr.Id, awaiting(cr))
-		if same {
-			msg += " It asks for this very change: the apply waits for it and does not file another."
-		} else {
-			msg += " It asks for another change: the apply fails until a person decides it."
-		}
-		resp.Diagnostics.AddWarning("A change request is pending", msg)
-	}
+	changes := req.State.Raw.IsNull() || !req.State.Raw.Equal(req.Plan.Raw)
+	r.session.lockChecks(ctx, "SOURCE", plan.Name.ValueString(), plan.effectiveManaged(r.session), st.ManagedBy, !req.State.Raw.IsNull(), changes, plan.body(), &resp.Diagnostics)
 }

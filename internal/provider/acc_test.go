@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -10,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
 // The acceptance tests run Terraform or OpenTofu (TF_ACC=1, and the CLI on the
@@ -229,5 +232,67 @@ resource "ligo_source" "x" {
 	})
 	if l.count() != 0 {
 		t.Errorf("%d filings: a refused plan files nothing", l.count())
+	}
+}
+
+// TestAccTargetLifecycle: create, a reformatting of the JSON that is no diff,
+// a level added, deprecated and removed, import and removal.
+func TestAccTargetLifecycle(t *testing.T) {
+	l := newLigoFake(t)
+	platformForms(l)
+	cfg := func(def, levels string) string {
+		return l.hcl(t, fmt.Sprintf(`
+resource "ligo_target" "t" {
+  name          = "ledger-db"
+  platform      = "pg"
+  jurisdiction  = "dc/corp-prod/ledger"
+  definition    = %s
+  access_levels = {
+%s
+  }
+  managed = false
+}
+`, def, levels))
+	}
+	const read = `    read = { grants = jsonencode({ roles = ["RO"] }) }`
+	const write = `    write = { grants = jsonencode({ roles = ["RW"] }) }`
+	const writeOld = `    write = {
+      grants = jsonencode({ roles = ["RW"] })
+      state  = "DEPRECATED"
+    }`
+	tight := `jsonencode({ database = "ledger", schema = "ledger" })`
+	loose := `"{\n  \"schema\": \"ledger\",\n  \"database\": \"ledger\"\n}"` // the same, written another way
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6,
+		Steps: []resource.TestStep{
+			{Config: cfg(tight, read), Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("ligo_target.t", "revision", "1"),
+				resource.TestCheckResourceAttr("ligo_target.t", "access_levels.read.state", "ACTIVE"),
+			)},
+			{Config: cfg(loose, read), ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{noChange{}}}}, // a reformatting is no diff
+			{Config: cfg(tight, read+"\n"+write), Check: resource.TestCheckResourceAttr("ligo_target.t", "access_levels.write.state", "ACTIVE")},
+			{Config: cfg(tight, read+"\n"+writeOld), Check: resource.TestCheckResourceAttr("ligo_target.t", "access_levels.write.state", "DEPRECATED")},
+			{Config: cfg(tight, read), Check: resource.TestCheckNoResourceAttr("ligo_target.t", "access_levels.write.grants")},
+			{ResourceName: "ligo_target.t", ImportState: true, ImportStateId: "ledger-db", ImportStateVerify: true, ImportStateVerifyIdentifierAttribute: "name",
+				ImportStateVerifyIgnore: []string{"managed", "last_change_request"}},
+			{Config: cfg(`jsonencode({ database = "ledger", schema = "ledger", password = "hunter2" })`, read),
+				ExpectError: regexp.MustCompile(`(?s)password is not a field`)},
+		},
+	})
+	if l.targets["ledger-db"]["metadata"].(map[string]any)["state"] != "RETIRED" {
+		t.Error("destroy must retire the target")
+	}
+}
+
+// noChange is an empty-plan check that shows what the plan would change.
+type noChange struct{}
+
+func (noChange) CheckPlan(_ context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
+	for _, rc := range req.Plan.ResourceChanges {
+		if rc.Change == nil || rc.Change.Actions.NoOp() {
+			continue
+		}
+		b, _ := json.Marshal(map[string]any{"before": rc.Change.Before, "after": rc.Change.After})
+		resp.Error = fmt.Errorf("%s would change: %s", rc.Address, b)
 	}
 }

@@ -21,6 +21,7 @@ type ligoFake struct {
 	mu        sync.Mutex
 	immediate bool                      // a filing is applied at once
 	sources   map[string]map[string]any // by name
+	targets   map[string]map[string]any // by name
 	crs       map[string]map[string]any // by id
 	order     []string
 	filings   int // POSTs and PUTs that filed a change request
@@ -30,13 +31,14 @@ type ligoFake struct {
 
 func newLigoFake(t *testing.T) *ligoFake {
 	t.Helper()
-	l := &ligoFake{fake: newFake(t), immediate: true, sources: map[string]map[string]any{}, crs: map[string]map[string]any{}, owner: "spiffe://prod.example.org/ci/terraform"}
+	l := &ligoFake{fake: newFake(t), immediate: true, sources: map[string]map[string]any{}, targets: map[string]map[string]any{}, crs: map[string]map[string]any{}, owner: "spiffe://prod.example.org/ci/terraform"}
 	handle := func(route string, h func(r *http.Request) (int, string)) {
 		l.fake.mu.Lock()
 		l.routes[route] = h
 		l.fake.mu.Unlock()
 	}
-	handle("POST /v1/admin/sources", l.fileSource)
+	handle("POST /v1/admin/sources", func(r *http.Request) (int, string) { return l.change(r, "SOURCE", "", "CREATE", "") })
+	handle("POST /v1/admin/targets", func(r *http.Request) (int, string) { return l.change(r, "TARGET", "", "CREATE", "") })
 	handle("GET /v1/admin/change-requests", l.listCRs)
 	l.serveCR()
 	return l
@@ -47,37 +49,44 @@ func (l *ligoFake) id() string {
 	return fmt.Sprintf("0194b7a0-0000-7000-8000-%012d", l.serial)
 }
 
-// routes for one source are added when it appears.
-func (l *ligoFake) route(name string) {
+// route adds the routes of one source or target when it appears.
+func (l *ligoFake) route(typ, name string) {
 	h := func(route string, f func(*http.Request) (int, string)) {
 		l.fake.mu.Lock()
 		l.routes[route] = f
 		l.fake.mu.Unlock()
 	}
-	base := "/v1/admin/sources/" + name
+	path, store := "sources", l.sources
+	if typ == "TARGET" {
+		path, store = "targets", l.targets
+	}
+	base := "/v1/admin/" + path + "/" + name
 	h("GET "+base, func(*http.Request) (int, string) {
 		l.mu.Lock()
 		defer l.mu.Unlock()
-		s, ok := l.sources[name]
+		s, ok := store[name]
 		if !ok {
-			return 404, `{"type":"urn:ligo:problem:not-found","title":"not found","status":404,"detail":"no such source"}`
+			return 404, `{"type":"urn:ligo:problem:not-found","title":"not found","status":404,"detail":"no such resource"}`
 		}
 		return 200, jsonOf(s)
 	})
-	h("PUT "+base, func(r *http.Request) (int, string) { return l.change(r, name, "UPDATE") })
+	h("PUT "+base, func(r *http.Request) (int, string) { return l.change(r, typ, name, "UPDATE", "") })
 	for _, op := range []string{"deprecate", "reactivate", "retire"} {
-		h("POST "+base+"/"+op, func(r *http.Request) (int, string) { return l.change(r, name, strings.ToUpper(op)) })
+		h("POST "+base+"/"+op, func(r *http.Request) (int, string) { return l.change(r, typ, name, strings.ToUpper(op), "") })
+		if typ == "TARGET" {
+			for _, level := range []string{"read", "write", "extra"} {
+				h("POST "+base+"/access-levels/"+level+"/"+op, func(r *http.Request) (int, string) {
+					return l.change(r, typ, name, strings.ToUpper(op)+"_LEVEL", level)
+				})
+			}
+		}
 	}
 }
 
 func jsonOf(v any) string { b, _ := json.Marshal(v); return string(b) }
 
-func (l *ligoFake) fileSource(r *http.Request) (int, string) {
-	return l.change(r, "", "CREATE")
-}
-
 // change files a change request for an operation on a source.
-func (l *ligoFake) change(r *http.Request, name, op string) (int, string) {
+func (l *ligoFake) change(r *http.Request, typ, name, op, level string) (int, string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	var body map[string]any
@@ -85,12 +94,16 @@ func (l *ligoFake) change(r *http.Request, name, op string) (int, string) {
 	_ = json.Unmarshal(raw, &body)
 	if name == "" {
 		name = body["metadata"].(map[string]any)["name"].(string)
-		l.route(name)
+		l.route(typ, name)
+	}
+	store := l.sources
+	if typ == "TARGET" {
+		store = l.targets
 	}
 	if _, ok := body["managed"]; ok && op != "CREATE" && op != "UPDATE" {
 		return 422, `{"type":"urn:ligo:problem:validation-failed","title":"invalid","status":422,"detail":"body: json: unknown field \"managed\""}`
 	}
-	cur := l.sources[name]
+	cur := store[name]
 	if cur != nil {
 		if mb, _ := cur["metadata"].(map[string]any)["managedBy"].(string); mb != "" && mb != l.owner {
 			return 409, `{"type":"urn:ligo:problem:resource-managed","title":"resource managed","status":409,"detail":"managed by another"}`
@@ -99,12 +112,23 @@ func (l *ligoFake) change(r *http.Request, name, op string) (int, string) {
 			return 409, `{"type":"urn:ligo:problem:revision-conflict","title":"conflict","status":409,"detail":"stale revision"}`
 		}
 	}
+	if typ == "TARGET" && op == "UPDATE" && cur != nil {
+		sent := map[string]bool{}
+		for _, e := range body["accessLevels"].([]any) {
+			sent[e.(map[string]any)["name"].(string)] = true
+		}
+		for _, e := range cur["accessLevels"].([]any) {
+			if n := e.(map[string]any)["name"].(string); !sent[n] {
+				return 422, `{"type":"urn:ligo:problem:validation-failed","title":"invalid","status":422,"detail":"accessLevels: ` + n + ` cannot be removed; retire it instead"}`
+			}
+		}
+	}
 	l.filings++
 	id := l.id()
-	cr := map[string]any{"id": id, "resourceType": "SOURCE", "resourceName": name, "resourceId": nil, "operation": op, "kind": "STANDARD", "consent": "ALL",
+	cr := map[string]any{"id": id, "resourceType": typ, "resourceName": name, "resourceId": nil, "operation": op, "kind": "STANDARD", "consent": "ALL",
 		"status": "PENDING", "dependsOn": nil, "policySha256": "ab", "distinctApproversRequired": false, "payloadSha256": "cd", "requestedBy": "ci",
 		"requestedAt": "2026-11-14T10:00:00Z", "expiresAt": "2026-11-15T10:00:00Z", "awaitingApproval": []string{"SOURCE"},
-		"sides": []any{map[string]any{"side": "SOURCE", "jurisdiction": "dc/corp-prod", "basis": "APPROVAL"}}, "payload": body}
+		"sides": []any{map[string]any{"side": "SOURCE", "jurisdiction": "dc/corp-prod", "basis": "APPROVAL"}}, "payload": body, "level": level}
 	l.crs[id], l.order = cr, append(l.order, id)
 	if l.immediate {
 		l.apply(id)
@@ -112,25 +136,63 @@ func (l *ligoFake) change(r *http.Request, name, op string) (int, string) {
 	return 202, `{"changeRequest":` + jsonOf(cr) + `,"resource":null}`
 }
 
-// apply applies a change request to the stored source (the lock held).
+// apply applies a change request to the stored resource (the lock held).
 func (l *ligoFake) apply(id string) {
 	cr := l.crs[id]
 	cr["status"], cr["awaitingApproval"] = "APPLIED", []string{}
-	name, op := cr["resourceName"].(string), cr["operation"].(string)
+	typ, name, op, level := cr["resourceType"].(string), cr["resourceName"].(string), cr["operation"].(string), cr["level"].(string)
 	body, _ := cr["payload"].(map[string]any)
-	s := l.sources[name]
+	store := l.sources
+	if typ == "TARGET" {
+		store = l.targets
+	}
+	s := store[name]
 	if s == nil {
 		s = map[string]any{"apiVersion": "ligo.dihedron.org/v1alpha1", "kind": "Source", "status": map[string]any{"bindings": 0}, "visibility": map[string]any{"mode": "PUBLIC"},
 			"metadata": map[string]any{"id": id, "name": name, "jurisdiction": "dc/corp-prod", "state": "ACTIVE", "revision": int64(0), "managedBy": nil,
 				"createdAt": "2026-11-01T10:00:00Z", "createdBy": "x", "updatedAt": "2026-11-02T10:00:00Z", "updatedBy": "x", "pendingChangeRequestId": nil}}
-		l.sources[name] = s
+		if typ == "TARGET" {
+			s["kind"], s["accessLevels"] = "Target", []any{}
+			md := s["metadata"].(map[string]any)
+			md["platform"], md["platformJurisdiction"], md["platformType"], md["realm"] = "pg", "dc/corp-prod", "postgres.v1", "prod"
+			md["jurisdiction"] = "dc/corp-prod/ledger"
+		}
+		store[name] = s
 	}
 	md := s["metadata"].(map[string]any)
 	md["revision"] = md["revision"].(int64) + 1
 	switch op {
 	case "CREATE", "UPDATE":
-		for _, k := range []string{"identity", "displayName", "description", "labels"} {
+		keys := []string{"identity", "displayName", "description", "labels"}
+		if typ == "TARGET" {
+			keys = []string{"definition", "accessLevels", "displayName", "description", "documentationUrl", "labels", "networkFlows"}
+			if m, ok := body["metadata"].(map[string]any); ok {
+				md["platform"] = m["platform"]
+				if j, ok := m["jurisdiction"].(string); ok {
+					md["jurisdiction"] = j
+				}
+			}
+		}
+		for _, k := range keys {
 			if v, ok := body[k]; ok {
+				if k == "accessLevels" { // ligo keeps each level's state, ACTIVE for a new one
+					old := map[string]any{}
+					for _, o := range s["accessLevels"].([]any) {
+						old[o.(map[string]any)["name"].(string)] = o.(map[string]any)["state"]
+					}
+					var lv []any
+					for _, e := range v.([]any) {
+						m := e.(map[string]any)
+						if _, given := m["state"]; !given {
+							m["state"] = "ACTIVE"
+							if st, ok := old[m["name"].(string)]; ok {
+								m["state"] = st
+							}
+						}
+						lv = append(lv, m)
+					}
+					v = lv
+				}
 				s[k] = v
 			} else {
 				delete(s, k)
@@ -152,6 +214,24 @@ func (l *ligoFake) apply(id string) {
 		md["state"] = "ACTIVE"
 	case "RETIRE":
 		md["state"] = "RETIRED"
+	case "DEPRECATE_LEVEL", "REACTIVATE_LEVEL", "RETIRE_LEVEL":
+		levels, _ := s["accessLevels"].([]any)
+		var kept []any
+		for _, lv := range levels {
+			m := lv.(map[string]any)
+			if m["name"] == level {
+				switch op {
+				case "DEPRECATE_LEVEL":
+					m["state"] = "DEPRECATED"
+				case "REACTIVATE_LEVEL":
+					m["state"] = "ACTIVE"
+				case "RETIRE_LEVEL":
+					m["state"] = "RETIRED"
+				}
+			}
+			kept = append(kept, m)
+		}
+		s["accessLevels"] = kept
 	}
 }
 
