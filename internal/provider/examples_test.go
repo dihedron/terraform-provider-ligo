@@ -17,6 +17,9 @@ import (
 // (T-P12).
 func TestExamples(t *testing.T) {
 	root := filepath.Join("..", "..", "examples", "data-sources")
+	if _, err := os.Stat(root); err != nil {
+		t.Skip("the examples are not here (the lab runs the test binary alone)")
+	}
 	for _, mk := range dataSources() {
 		d := mk()
 		var m datasource.MetadataResponse
