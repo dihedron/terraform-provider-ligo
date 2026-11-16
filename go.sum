@@ -8,8 +8,8 @@ github.com/bufbuild/protocompile v0.14.1 h1:iA73zAf/fyljNjQKwYzUHD6AD4R8KMasmwa/
 github.com/bufbuild/protocompile v0.14.1/go.mod h1:ppVdAIhbr2H8asPk6k4pY7t9zB1OU5DoEw9xY/FUi1c=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/dihedron/ligo v0.6.0 h1:juztxPTWQ+PIB63n+rMaAAs0BBjxMaaY4NvZ6VyQWac=
-github.com/dihedron/ligo v0.6.0/go.mod h1:ztnRJg/qRtSPQbZBUff5I1UQyFGgiwBcOjWGgvShud4=
+github.com/dihedron/ligo v0.7.0 h1:eaLQnZt5r6eZyE2AKOEOWiqe7MlnHBgA6MWtsIV8eQA=
+github.com/dihedron/ligo v0.7.0/go.mod h1:/WT83UN/PkZGftncZJ9yMVPvFeJfeW/p/2gsPsNrPoU=
 github.com/fatih/color v1.13.0/go.mod h1:kLAiJbzzSOZDVNGyDpeOxJ47H46qBXwg5ILebYFFOfk=
 github.com/fatih/color v1.18.0 h1:S8gINlzdQ840/4pfAwic/ZE0djQEH3wM94VfqLTZcOM=
 github.com/fatih/color v1.18.0/go.mod h1:4FelSpRwEGDpQ12mAdzqdOukCy4u8WUtOY6lkT/6HfU=

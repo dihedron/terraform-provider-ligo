@@ -3,7 +3,7 @@ module github.com/dihedron/terraform-provider-ligo
 go 1.27.4
 
 require (
-	github.com/dihedron/ligo v0.6.0
+	github.com/dihedron/ligo v0.7.0
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
 	github.com/hashicorp/terraform-plugin-go v0.31.0
 	github.com/hashicorp/terraform-plugin-log v0.10.0
