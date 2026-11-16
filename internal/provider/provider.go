@@ -84,5 +84,5 @@ func (p *Ligo) Configure(ctx context.Context, req provider.ConfigureRequest, res
 // Resources are added by chunk 4.
 func (p *Ligo) Resources(context.Context) []func() resource.Resource { return nil }
 
-// DataSources are added by chunks 2 and 3.
-func (p *Ligo) DataSources(context.Context) []func() datasource.DataSource { return nil }
+// DataSources are the reads of chunk 2 (the instances come with chunk 3).
+func (p *Ligo) DataSources(context.Context) []func() datasource.DataSource { return dataSources() }

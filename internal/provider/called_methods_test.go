@@ -17,7 +17,10 @@ import (
 // allowedCalls are the methods of *adminclient.Client that the provider calls
 // (spec §2, AC-P8). A chunk that needs one adds it here, in its own commit, so
 // that the list is what a reviewer reads.
-var allowedCalls = []string{}
+var allowedCalls = []string{
+	"GetSource", "ListSources", "GetTarget", "ListTargets", "GetBinding", "ListBindings", "GetPlatform", "ListPlatforms",
+	"SearchCatalog", "GetCatalogTarget", "GetCharter", "ListHolds",
+}
 
 // decisionWords are what no method the provider calls may start with: the
 // decisions of people (T-P3). Reading them (ListBreakGlass) is not deciding.
