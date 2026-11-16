@@ -1,8 +1,8 @@
 # The ligo Terraform and OpenTofu provider
 
-- **Version:** 0.1 (2026-11-15), draft for the user's approval; nothing is implemented until it is approved (AGENTS.md rules 1 and 3).
+- **Version:** 0.2 (2026-11-16), draft for the user's approval (v0.1 of 2026-11-15 had the lock as an open point; §3.7 is now written from what `ligo` v0.7.0 shipped, and open points 2 to 4 have their defaults); nothing is implemented until it is approved (AGENTS.md rules 1 and 3).
 - **Backlog:** `ligo/.specs/ligo-backlog.md`, item 8
-- **Depends on:** `ligo/.specs/ligo-adminclient.md` (approved, built, `pkg/adminclient` in the `ligo` module), and, for chunk 4, `ligo/.specs/ligo-managed-resources.md` (the lock: a spec still to be written, in `ligo`)
+- **Depends on:** `ligo/.specs/ligo-adminclient.md` (approved, built, `pkg/adminclient` in the `ligo` module), and `ligo/.specs/ligo-managed-resources.md` (the lock, ADR-17: built and released in `ligo` v0.7.0, which the provider pins)
 - **Decisions of the user (2026-11-14 and 2026-11-15):** instances are in scope, as data sources first and then as resources that file a request and wait; the lock "managed by automation" is specified and built in `ligo` before the provider's resources; the provider authenticates with the SPIFFE Workload API or with LDAP Basic credentials; a removal from the configuration files the deletion and waits for it; the provider is a separate repository, on `terraform-plugin-framework`.
 
 ## 1. Why
@@ -11,7 +11,7 @@
 
 ## 2. Scope
 
-In: the resources `ligo_source`, `ligo_target`, `ligo_binding`, `ligo_platform`, `ligo_identity_provider` and `ligo_secret_store`; the data sources that read them, the catalog and the charter in force; `terraform import` of every resource; acceptance tests with Terraform and with OpenTofu; the registry reference and the guides.
+In: the resources `ligo_source`, `ligo_target`, `ligo_binding`, `ligo_platform`, `ligo_identity_provider` and `ligo_secret_store`; the data sources that read them, the catalog, the charter in force and the holds (`ligo_holds`); `terraform import` of every resource; acceptance tests with Terraform and with OpenTofu; the registry reference and the guides.
 
 Out: the charter and `instance_bounds` (root-owned `server.yaml`, T-22 in `ligo`); accounts (an administrator's act, `account_admin`); break-glass, approvals, ratifications and reverts (decisions of people); maintenance mode, audit export and verification, executors (operations, not infrastructure); the plugins' own configuration; Pulumi and other tools that bridge a Terraform provider (they may work, nobody promises it).
 
@@ -77,13 +77,18 @@ Removing a resource from the configuration, or `terraform destroy`, files the de
 
 A refresh reads the resource from `ligo` and a difference is a diff in the next plan: someone changed it in the UI, with the CLI or through another pipeline. A resource that is gone (retired by someone else) is removed from the state, as Terraform expects. `terraform import ligo_source.x name` and the same for every other resource reads the resource and its revision into the state; the first plan after it shows what the configuration would change. A resource the caller may not see is `not found` for it (the admin API shows nothing outside the caller's jurisdictions) and the provider reports it that way, without guessing why.
 
-### 3.7 The lock (chunk 4, after `ligo-managed-resources.md`)
+### 3.7 The lock (chunk 4; `ligo` v0.7.0, ADR-17)
 
-The user's direction of 2026-11-08, restated on 2026-11-15: resources that Terraform creates are marked "managed by automation"; people cannot change them, except a binding through break-glass, and a lasting change goes only through the Terraform configuration. The lock is a feature of `ligo` (a flag and its enforcement) and is specified there; this provider only sets it when it files a resource, reads it back and shows it. Until that spec is approved and built, chunk 4 is not started. What the provider settles here:
+The user's direction of 2026-11-08, restated on 2026-11-15: resources that Terraform creates are marked "managed by automation"; people cannot change them, except a binding through break-glass, and a lasting change goes only through the Terraform configuration. The lock is a feature of `ligo`, specified in `ligo/.specs/ligo-managed-resources.md` and released in v0.7.0. The provider sets it when it files a resource, reads it back and shows it; it never decides anything about it. What `ligo` does, and what the provider does on top:
 
-- It sets the flag on every resource it creates and never clears it unless the resource leaves Terraform's management by an explicit `managed = false` in the configuration (a change that the lock's owner may file).
-- A resource that `ligo` reports as managed by another automation is an error at plan time, not an overwrite (two pipelines never fight over one resource).
-- A break-glass change on a managed binding appears as drift in the next plan; what `apply` then does (put it back, or fail while a break-glass review is open) is decided by the lock's spec, and the provider follows it.
+- **Who owns.** A source, target or binding filed with `managed: true` by a principal holding `trusted_automation` on every jurisdiction involved (the owner, the source, the target and the platform) belongs to that principal's SPIFFE ID (`managedBy`). Only the owner changes it; anyone else, whatever the role, gets `409 resource-managed` and nothing is filed. Platforms, identity providers, secret stores and accounts are never managed, so `managed` exists on `ligo_source`, `ligo_target` and `ligo_binding` only.
+- **The attribute.** The provider has a default `managed` (true) and each of the three resources has a `managed` attribute that overrides it; `managed_by` is computed on the resources and on their data sources. The provider sends `adminclient.Options.Managed` on every create and update. `managed = false` on a resource that is managed is the owner's own release (`Unmanaged`), applied like any other change.
+- **A person is not an owner.** A run with LDAP credentials (`username`) is a person, and `ligo` answers `403` to `managed: true` from a person. When the provider is configured with `username` and a resource would be managed, the plan says so as an error with the way out (`managed = false`, or a SPIFFE identity), instead of letting the apply fail.
+- **Another owner's resource.** A resource that `ligo` reports as managed by another SPIFFE ID is an error at plan time, not an overwrite (two pipelines never fight over one resource); the apply surfaces `409 resource-managed` as the problem it is.
+- **Break-glass.** A break-glass change of a managed binding is allowed, is never ratified and reverts at its TTL. It appears as drift in the next plan; the apply puts the configuration back, and while a break-glass review is open on the resource the apply fails with the request's ID.
+- **Holds.** A binding removed in an emergency (containment by an owner of a side, or a break-glass `DELETE`) leaves a hold, and nobody creates the binding again, the owner included, until a person lifts it (`409 resource-held`). The apply that re-creates it fails with the problem's text and names who may act (`ligo hold list`, `ligo hold lift`, a person who approves a side). The provider never lifts a hold and never releases a lock: that is a person's act, like an approval, and the methods stay off the called-methods list (§5, AC-P8). The data source `ligo_holds` (`ListHolds`, read-only) shows what is holding a pipeline back.
+- **Adoption.** Adding `managed = true` to a resource brought in by `terraform import` is an update that the sides' people must consent to (they decide, not the automation): the apply waits like any other write (§3.3).
+- **Orphans.** A lock whose automation is gone is released by an administrator through a four-eyes request (`ligo source|target|binding release`); the provider has no part in it. A resource released that way reads `managed_by` empty, and the next apply with `managed = true` adopts it again.
 
 ## 4. Threat model
 
@@ -95,13 +100,15 @@ The user's direction of 2026-11-08, restated on 2026-11-15: resources that Terra
 | T-P4 | A person running Terraform by hand is mistaken for automation, or the reverse. | A person is never `trusted_automation` (ADR-11: SPIFFE principals only); the provider does not decide the basis, `ligo` does; the plan says nothing about approval it cannot know and the apply waits for what the server asks. |
 | T-P5 | A stale plan, applied late, overwrites a newer change. | The revision in the state goes as `expectedRevision`; `ErrConflict` fails the apply and asks for a refresh; no automatic retry. |
 | T-P6 | A retry, or a crash between filing and waiting, files the change twice. | The client never retries a write. The next plan or apply finds the open request of the same `payloadSha256` and waits for it instead. A test kills the provider after the filing. |
-| T-P7 | A compromised automation SVID changes or deletes everything it can reach. | The blast radius is the jurisdictions and platforms of its `trusted_automation` binding, and its rate limit; every change is audited with the `automationContext` and the `approvalReference`; the lock (§3.7) stops anyone else from changing what it manages. The provider does not widen any of this and documents the registration advice of `ligo` §10.6 (the attested binary is Terraform, a generic CLI). |
+| T-P7 | A compromised automation SVID changes or deletes everything it can reach. | The blast radius is the jurisdictions and platforms of its `trusted_automation` binding, and its rate limit; every change is audited with the `automationContext` and the `approvalReference`; the lock (§3.7, built in `ligo` v0.7.0) stops anyone else from changing what it manages. The provider does not widen any of this and documents the registration advice of `ligo` §10.6 (the attested binary is Terraform, a generic CLI). |
 | T-P8 | A huge catalog or a hostile server exhausts the runner's memory or time. | The client's 8 MiB body cap, the data sources' limit on items, the context honoured at every call. |
 | T-P9 | A removal deletes something shared. | Deletion is a filed request that `ligo` may refuse (`ErrState` while bindings exist); the resource is the user's declared one; the docs say that `prevent_destroy` is Terraform's tool and show it on sources and targets. |
 | T-P10 | An instance's `config` carries a secret by mistake. | The plugin schemas of `ligo` refuse unknown keys; the provider validates against them at plan time; the attribute is sensitive; the docs show references only. |
 | T-P11 | A malicious or confused provider release reaches the users. | Signed releases and the checksum manifest the registries need (goreleaser), `make vuln` and `make secrets` before every commit, pinned dependencies, no `go:generate` that downloads at build time. |
 | T-P12 | The registry reference or an example publishes a real value. | The examples use the lab's reserved names (`example.org`, `.lab`) and a test greps `docs/` and `examples/` for the shapes of keys and tokens. |
 | T-P13 | The generated client or the generator drifts from the contract. | `ligo`'s `make generate-check` and `TestOpenAPI*` guard the contract; the provider's build pins the `ligo` module version, and the acceptance tests run against the matching `ligo`. |
+| T-P14 | A hold blocks a pipeline, and its owner works around it by re-filing. | The apply fails with `resource-held`, naming who may lift it; the provider never retries and never lifts; the lift is a person's audited act. |
+| T-P15 | A person running the provider sets `managed = true` and gets a surprise `403` after waiting. | The plan fails first, naming the cause and the way out (§3.7). |
 
 ## 5. Acceptance criteria and tests first
 
@@ -116,7 +123,7 @@ The user's direction of 2026-11-08, restated on 2026-11-15: resources that Terra
 | AC-P7 | Drift, a resource gone, the free-form JSON normalisation. | Unit tests; a fuzz target for the normaliser (it must be idempotent and never lose a key). |
 | AC-P8 | The provider calls only the methods on its list, and none that decides. | `TestCalledMethods`: parses the provider's source for calls on `*adminclient.Client`. |
 | AC-P9 | A restart of `ligo` during a wait, a replica killed during an apply, and an approval after the time-out leave Terraform and `ligo` consistent. | Lab suite with chaos steps (chunk 6). |
-| AC-P10 | The lock (chunk 4): a resource filed by the provider is managed; a managed resource of another owner is refused at plan time. | Specified with `ligo-managed-resources.md`. |
+| AC-P10 | The lock (chunk 4): a resource filed by the provider is managed; `managed_by` is read back; a managed resource of another owner is refused at plan time; `managed = false` releases; a person with LDAP credentials and `managed = true` is refused at plan time; `resource-held` and `resource-managed` reach the user with their text. | Unit tests with a fake admin server that returns `managedBy` of another owner and the two problems; acceptance tests against the lab (chunk 4), with a pipeline SVID and a rival. |
 
 Tests are written before the code of each chunk, from this table. Proposed, for the user to accept: a fuzz target for the JSON normaliser, a benchmark of a plan over 1,000 data source items, and a soak run of repeated apply and destroy cycles against the lab with random kills of `ligo`.
 
@@ -129,16 +136,20 @@ The registry reads the reference from `docs/` (generated with `tfplugindocs`, wi
 | Chunk | Content |
 |---|---|
 | 0 | This spec, approved. |
-| 1 | The provider's configuration and the admin client wired in (§3.1); the called-methods test; the acceptance harness with Terraform and OpenTofu against the lab (AC-P1, AC-P8). Started 2026-11-15 on the user's word, after `ligo` v0.6.0, before this spec was reviewed: configuration, session and `TestCalledMethods` are written, tests first (schema, round trip over TLS, wrong server gets no credentials, every refusal, no password in a diagnostic); the SPIFFE Workload API path and the acceptance harness are not yet covered (they need a SPIRE agent and the lab). The `ligo` module is `v0.6.0`. |
-| 2 | The read data sources: sources, targets, bindings, platforms, the catalog, the charter (AC-P2 for reads). |
+| 1 | (PR #1, `ligo` v0.7.0 pinned) The provider's configuration and the admin client wired in (§3.1); the called-methods test; the acceptance harness with Terraform and OpenTofu against the lab (AC-P1, AC-P8). Started 2026-11-15 on the user's word, after `ligo` v0.6.0, before this spec was reviewed: configuration, session and `TestCalledMethods` are written, tests first (schema, round trip over TLS, wrong server gets no credentials, every refusal, no password in a diagnostic); the SPIFFE Workload API path and the acceptance harness are not yet covered (they need a SPIRE agent and the lab). The `ligo` module is `v0.6.0`. |
+| 2 | The read data sources: sources, targets, bindings, platforms, the catalog, the charter, and `ligo_holds`; `managed_by` on every one that has it (AC-P2 for reads). |
 | 3 | The data sources of identity provider and secret store instances. |
-| 4 | The resources `ligo_source`, `ligo_target`, `ligo_binding` with the apply, removal, drift and import rules; the lock (§3.7), which needs `ligo-managed-resources.md` built first (AC-P2 to P7, P10). |
+| 4 | The resources `ligo_source`, `ligo_target`, `ligo_binding` with the apply, removal, drift and import rules; the lock (§3.7), which is built and released in `ligo` v0.7.0 (AC-P2 to P7, P10). |
 | 5 | The instance resources, which file and wait (§3.3, `ligo` T-22). |
 | 6 | The lab suite with the chaos steps; the registry reference and the PDF guides; a release (AC-P9). |
 
 ## 8. Open points
 
-1. **The lock's design** is in `ligo-managed-resources.md`, to write next; it must settle who owns a lock, containment by the platform's owner, and the conflict between "always reverted" and `ligo`'s ADR-12 rule 4 (an emergency deletion is final). Chunk 4 waits for it.
-2. **Plan-time validation against the platform's schemas** needs the server at plan time; a plan on a runner with no access to `ligo` validates less. Is that acceptable, or must a vendored schema be an option?
-3. **`ligo_account`** is left out as an administrator's act; say if the provider should manage accounts too.
-4. **Versioning with `ligo`:** the provider pins a `ligo` module version; how many `ligo` versions behind it supports is to decide at the first release.
+All settled on 2026-11-16 (the user took the recommended answers):
+
+1. **The lock's design**: settled by `ligo` v0.7.0 and written in §3.7.
+2. **Plan-time validation against the platform's schemas** needs the server at plan time; a plan on a runner with no access to `ligo` validates what it can and says that it did not validate the rest. There is no vendored copy of the schemas.
+3. **`ligo_account`** is left out: accounts are an administrator's act (`account_admin`).
+4. **Versioning with `ligo`:** the provider supports the `ligo` version whose module it pins and the next minor one (at 0.x there is no wider promise). The pinned version is in `go.mod`, the supported ones in the docs and the release notes; a `ligo` that is too old or too new for a call answers with a problem that the provider shows as it is.
+
+Where this spec names a `ligo` command, it is the `ligo <object> <verb>` form of v0.7.0 (`ligo source show`, `ligo binding list`, `ligo hold list`, `ligo source release`).
