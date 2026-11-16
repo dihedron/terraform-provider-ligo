@@ -44,6 +44,7 @@ type model struct {
 	ApprovalTimeout   types.String `tfsdk:"approval_timeout"`
 	ApprovalReference types.String `tfsdk:"approval_reference"`
 	AutomationContext types.Map    `tfsdk:"automation_context"`
+	Managed           types.Bool   `tfsdk:"managed"`
 }
 
 // Schema is the provider's configuration, spec §3.1.
@@ -61,6 +62,8 @@ func (p *Ligo) Schema(_ context.Context, _ provider.SchemaRequest, resp *provide
 			"approval_timeout": schema.StringAttribute{Optional: true, Description: "How long a write waits for its change request, a duration such as 10m (the default); at most 24h. " +
 				"A request that is still pending then is an error; it stays in ligo and may still be approved."},
 			"approval_reference": schema.StringAttribute{Optional: true, Description: "The upstream change record (a ticket, a pipeline run) sent with every filing; ligo requires it for a delegated approval."},
+			"managed": schema.BoolAttribute{Optional: true, Description: "The default of every source, target and binding: true (the default) files them as managed by this automation, so that only it changes them (the lock). " +
+				"Each resource's own managed overrides it. A run with username is a person and cannot own: set it to false."},
 			"automation_context": schema.MapAttribute{Optional: true, ElementType: types.StringType, Description: "Who runs the automation (job, workspace, run URL), recorded by ligo for traceability; never used for authorization."},
 		},
 	}
@@ -81,8 +84,10 @@ func (p *Ligo) Configure(ctx context.Context, req provider.ConfigureRequest, res
 	resp.DataSourceData, resp.ResourceData = s, s
 }
 
-// Resources are added by chunk 4.
-func (p *Ligo) Resources(context.Context) []func() resource.Resource { return nil }
+// Resources are what the provider writes: the sources so far (chunk 4a).
+func (p *Ligo) Resources(context.Context) []func() resource.Resource {
+	return []func() resource.Resource{newSourceResource}
+}
 
 // DataSources are the reads of chunk 2 (the instances come with chunk 3).
 func (p *Ligo) DataSources(context.Context) []func() datasource.DataSource { return dataSources() }

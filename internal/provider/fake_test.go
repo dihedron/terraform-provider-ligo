@@ -20,17 +20,23 @@ type fake struct {
 	*httptest.Server
 	mu       sync.Mutex
 	routes   map[string]func(r *http.Request) (int, string) // "GET /v1/admin/sources"
+	prefix   map[string]func(r *http.Request) (int, string) // "GET /v1/admin/change-requests/": by the start of the path
 	requests []string                                       // method, path and query of each request
 	ca       string
 }
 
 func newFake(t *testing.T) *fake {
 	t.Helper()
-	f := &fake{routes: map[string]func(*http.Request) (int, string){}}
+	f := &fake{routes: map[string]func(*http.Request) (int, string){}, prefix: map[string]func(*http.Request) (int, string){}}
 	f.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.requests = append(f.requests, r.Method+" "+r.URL.RequestURI())
 		h := f.routes[r.Method+" "+r.URL.Path]
+		for p, ph := range f.prefix {
+			if h == nil && strings.HasPrefix(r.Method+" "+r.URL.Path, p) {
+				h = ph
+			}
+		}
 		f.mu.Unlock()
 		if h == nil {
 			w.Header().Set("Content-Type", "application/problem+json")
