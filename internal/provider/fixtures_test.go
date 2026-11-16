@@ -39,3 +39,14 @@ func page(items string, next string) string {
 	}
 	return `{"items":[` + items + `],"nextPageToken":` + n + `}`
 }
+
+// instanceJSON is an identity provider or a secret store; a viewer who may not
+// file on its jurisdiction gets neither the revision nor the definition.
+func instanceJSON(kind, name, typ string, privileged bool) string {
+	extra := ""
+	if privileged {
+		extra = `,"revision":4,"definition":{"kind":"` + kind + `","metadata":{"name":"` + name + `"},"config":{"url":"https://ldap.example.org","base":"dc=example,dc=org","a":1}}`
+	}
+	return fmt.Sprintf(`{"apiVersion":"ligo.dihedron.org/v1alpha1","kind":%q,"name":%q,"type":%q,"jurisdiction":"dc/corp-prod","realm":"prod","displayName":"Directory",
+		"contacts":[{"name":"ops","email":"ops@example.org"}],"networkFlows":[{"name":"ldap","destination":"ldap.example.org","ports":[636],"protocol":"TCP","purpose":"CONTROL"}]%s}`, kind, name, typ, extra)
+}

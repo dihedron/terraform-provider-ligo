@@ -37,6 +37,12 @@ func jsonA(desc string) schema.Attribute {
 	return schema.StringAttribute{Computed: true, Description: desc + " As JSON text, in its normal form (sorted keys, no extra white space)."}
 }
 
+// jsonSecretA is a free-form part that might carry a secret by mistake: it is
+// sensitive, so that no plan or output shows it (T-P10).
+func jsonSecretA(desc string) schema.Attribute {
+	return schema.StringAttribute{Computed: true, Sensitive: true, Description: desc + " Sensitive, as JSON text in its normal form (sorted keys, no extra white space)."}
+}
+
 func sv(s string) attr.Value { return types.StringValue(s) }
 func sp(s *string) attr.Value {
 	if s == nil {
@@ -234,6 +240,74 @@ var platformItem = map[string]schema.Attribute{
 	"revision": intA("The revision."), "quarantined": boolA("Whether ligo isolated it after repeated failures."), "serving": boolA("Whether its plugin is healthy."),
 }
 
+// instanceVals maps an identity provider or a secret store. Only a person who
+// may file or decide on its jurisdiction gets the revision and the definition:
+// for anyone else they are null, not zero.
+func instanceVals(m adminclient.Instance) (vals, error) {
+	v := vals{
+		"name": sv(m.Name), "display_name": sp(m.DisplayName), "description": sp(m.Description), "type": sv(m.Type),
+		"jurisdiction": sv(m.Jurisdiction), "realm": sv(m.Realm),
+	}
+	if m.Revision != nil {
+		v["revision"] = iv(*m.Revision)
+	}
+	if m.Quarantined != nil {
+		v["quarantined"] = bv(*m.Quarantined)
+	}
+	var err error
+	if v["network_flows"], err = jsonV("network_flows", m.NetworkFlows); err != nil {
+		return nil, err
+	}
+	if m.Contacts != nil {
+		if v["contacts"], err = jsonV("contacts", *m.Contacts); err != nil {
+			return nil, err
+		}
+	}
+	if m.Definition != nil && m.Definition.Config != nil {
+		if v["config"], err = jsonV("config", *m.Definition.Config); err != nil {
+			return nil, err
+		}
+	}
+	return v, nil
+}
+
+var instanceItem = map[string]schema.Attribute{
+	"name": strA("The name."), "display_name": strA("A name for people."), "description": strA("What it is."), "type": strA("The plugin type and version, such as openldap.v1."),
+	"jurisdiction": strA("The jurisdiction."), "realm": strA("The realm."),
+	"revision": intA("The revision; null for someone who may not file on its jurisdiction, and for an instance that server.yaml defines."), "quarantined": boolA("Whether its stored row does not verify: it is not in force."),
+	"network_flows": jsonA("The network flows it needs."), "contacts": jsonA("Who to ask."),
+	"config": jsonSecretA("The plugin's configuration; null for someone who may not file on its jurisdiction. It names a credential, it never holds one."),
+}
+
+func instanceEntity(kind, plural, desc string, get func(*adminclient.Client, context.Context, string) (adminclient.Instance, error),
+	list func(*adminclient.Client, context.Context) ([]adminclient.Instance, error)) *entity {
+	return &entity{
+		kind: kind, plural: plural, desc: desc, item: instanceItem,
+		get: func(ctx context.Context, c *adminclient.Client, name string) (vals, error) {
+			i, err := get(c, ctx, name)
+			if err != nil {
+				return nil, err
+			}
+			return instanceVals(i)
+		},
+		list: func(ctx context.Context, c *adminclient.Client, _ filters) iter.Seq2[vals, error] {
+			return func(yield func(vals, error) bool) {
+				is, err := list(c, ctx)
+				if err != nil {
+					yield(nil, err)
+					return
+				}
+				for _, i := range is {
+					v, err := instanceVals(i)
+					if !yield(v, err) {
+						return
+					}
+				}
+			}
+		},
+	}
+}
+
 func catalogVals(m adminclient.CatalogTarget) (vals, error) {
 	v := vals{
 		"name": sv(m.Name), "display_name": sp(m.DisplayName), "description": sp(m.Description), "jurisdiction": sv(m.Jurisdiction),
@@ -386,6 +460,10 @@ func entities() []*entity {
 				}
 			},
 		},
+		instanceEntity("identity_provider", "identity_providers", "An identity provider instance: how a platform's principals are named and authenticated.",
+			(*adminclient.Client).GetIdentityProvider, (*adminclient.Client).ListIdentityProviders),
+		instanceEntity("secret_store", "secret_stores", "A secret store instance: where a platform keeps the credentials it hands out.",
+			(*adminclient.Client).GetSecretStore, (*adminclient.Client).ListSecretStores),
 		{
 			kind: "catalog_target", desc: "A target card of the catalog, with what the charter says about each of the caller's sources.", item: catalogCardItem,
 			get: func(ctx context.Context, c *adminclient.Client, name string) (vals, error) {

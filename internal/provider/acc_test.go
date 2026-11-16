@@ -124,3 +124,39 @@ func TestAccWrongServerGetsNoCredentials(t *testing.T) {
 		t.Errorf("the wrong server saw %s", r)
 	}
 }
+
+// The instances' data sources, and T-P10 in HCL: the config is sensitive, so an
+// output that shows it must say so.
+func TestAccInstances(t *testing.T) {
+	f := newFake(t)
+	f.on("GET /v1/admin/identity-providers/dir", 200, instanceJSON("IdentityProvider", "dir", "openldap.v1", true))
+	f.on("GET /v1/admin/secret-stores", 200, `{"items":[`+instanceJSON("SecretStore", "vault", "vault.v1", false)+`]}`)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6,
+		Steps: []resource.TestStep{
+			{
+				Config: f.hcl(t, `
+data "ligo_identity_provider" "dir" { name = "dir" }
+data "ligo_secret_stores" "all" {}
+output "config" { value = data.ligo_identity_provider.dir.config }
+`),
+				ExpectError: regexp.MustCompile(`(?i)sensitive`),
+			},
+			{
+				Config: f.hcl(t, `
+data "ligo_identity_provider" "dir" { name = "dir" }
+data "ligo_secret_stores" "all" {}
+output "config" {
+  value     = data.ligo_identity_provider.dir.config
+  sensitive = true
+}
+`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("data.ligo_identity_provider.dir", "type", "openldap.v1"),
+					resource.TestCheckResourceAttr("data.ligo_secret_stores.all", "items.0.type", "vault.v1"),
+					resource.TestCheckNoResourceAttr("data.ligo_secret_stores.all", "items.0.config"),
+				),
+			},
+		},
+	})
+}

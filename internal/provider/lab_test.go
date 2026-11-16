@@ -43,6 +43,10 @@ data "ligo_holds" "open" {}
 data "ligo_target" "t" { name = %q }
 data "ligo_catalog_targets" "all" {}
 data "ligo_bindings" "all" { limit = 5000 }
+data "ligo_identity_provider" "dir" { name = "openldap-prod" }
+data "ligo_secret_store" "vault" { name = "vault-prod" }
+data "ligo_identity_providers" "all" {}
+data "ligo_secret_stores" "all" {}
 `, server, socket, id, managed, free, labEnv(t, "LIGO_LAB_TARGET"))
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: protoV6,
@@ -55,6 +59,11 @@ data "ligo_bindings" "all" { limit = 5000 }
 				resource.TestMatchResourceAttr("data.ligo_charter.now", "sha256", regexp.MustCompile(`^[0-9a-f]{64}$`)),
 				resource.TestCheckResourceAttr("data.ligo_platforms.all", "items.0.serving", "true"),
 				resource.TestCheckResourceAttr("data.ligo_target.t", "platform", "pg-ledger"),
+				resource.TestCheckResourceAttr("data.ligo_identity_provider.dir", "type", "openldap.v1"),
+				resource.TestCheckResourceAttr("data.ligo_identity_provider.dir", "realm", "prod"),
+				resource.TestCheckResourceAttr("data.ligo_secret_store.vault", "type", "vault.v1"),
+				resource.TestMatchResourceAttr("data.ligo_identity_providers.all", "items.#", regexp.MustCompile(`^[1-9]`)),
+				resource.TestMatchResourceAttr("data.ligo_secret_stores.all", "items.#", regexp.MustCompile(`^[1-9]`)),
 				resource.TestMatchResourceAttr("data.ligo_catalog_targets.all", "items.#", regexp.MustCompile(`^[1-9]`)),
 			),
 		}},

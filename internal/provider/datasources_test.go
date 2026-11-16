@@ -1,6 +1,10 @@
 package provider
 
 import (
+	"context"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	dschema "github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"net/http"
 	"strings"
 	"testing"
@@ -241,5 +245,93 @@ func TestUnconfiguredProvider(t *testing.T) {
 	_, diags := read(t, "ligo_charter", nil, nil)
 	if !diags.HasError() || !strings.Contains(errorText(diags), "not configured") {
 		t.Fatalf("diagnostics: %q", errorText(diags))
+	}
+}
+
+func TestInstances(t *testing.T) {
+	for _, tc := range []struct{ one, many, route, kind, typ string }{
+		{"ligo_identity_provider", "ligo_identity_providers", "identity-providers", "IdentityProvider", "openldap.v1"},
+		{"ligo_secret_store", "ligo_secret_stores", "secret-stores", "SecretStore", "vault.v1"},
+	} {
+		t.Run(tc.one, func(t *testing.T) {
+			f := newFake(t)
+			f.on("GET /v1/admin/"+tc.route+"/dir", 200, instanceJSON(tc.kind, "dir", tc.typ, true))
+			f.on("GET /v1/admin/"+tc.route+"/plain", 200, instanceJSON(tc.kind, "plain", tc.typ, false))
+			f.on("GET /v1/admin/"+tc.route, 200, `{"items":[`+instanceJSON(tc.kind, "a", tc.typ, true)+`,`+instanceJSON(tc.kind, "b", tc.typ, false)+`]}`)
+
+			// who may file on the jurisdiction sees the revision and the config, in normal form
+			st, diags := read(t, tc.one, f.session(t), map[string]any{"name": "dir"})
+			if diags.HasError() {
+				t.Fatal(errorText(diags))
+			}
+			if s(t, st, path.Root("type")) != tc.typ || s(t, st, path.Root("realm")) != "prod" || s(t, st, path.Root("jurisdiction")) != "dc/corp-prod" {
+				t.Errorf("instance %v", st.Raw)
+			}
+			if n := attrOf[types.Int64](t, st, path.Root("revision")).ValueInt64(); n != 4 {
+				t.Errorf("revision %d", n)
+			}
+			if got, want := s(t, st, path.Root("config")), `{"a":1,"base":"dc=example,dc=org","url":"https://ldap.example.org"}`; got != want {
+				t.Errorf("config %s, want %s", got, want)
+			}
+			if !strings.Contains(s(t, st, path.Root("network_flows")), `"destination":"ldap.example.org"`) || !strings.Contains(s(t, st, path.Root("contacts")), `"ops"`) {
+				t.Errorf("flows or contacts: %v", st.Raw)
+			}
+
+			// anyone else gets nulls, not zeros
+			st, diags = read(t, tc.one, f.session(t), map[string]any{"name": "plain"})
+			if diags.HasError() {
+				t.Fatal(errorText(diags))
+			}
+			for _, k := range []string{"revision", "config"} {
+				var v attr.Value
+				if k == "revision" {
+					v = attrOf[types.Int64](t, st, path.Root(k))
+				} else {
+					v = attrOf[types.String](t, st, path.Root(k))
+				}
+				if !v.IsNull() {
+					t.Errorf("%s is %v, want null", k, v)
+				}
+			}
+
+			// the plural keeps the order of ligo, by name
+			st, diags = read(t, tc.many, f.session(t), nil)
+			if diags.HasError() {
+				t.Fatal(errorText(diags))
+			}
+			if s(t, st, path.Root("items").AtListIndex(0).AtName("name")) != "a" || s(t, st, path.Root("items").AtListIndex(1).AtName("name")) != "b" {
+				t.Errorf("items out of order: %v", st.Raw)
+			}
+			if _, diags = read(t, tc.many, f.session(t), map[string]any{"limit": 1}); !strings.Contains(errorText(diags), "more than 1 items") {
+				t.Errorf("limit: %q", errorText(diags))
+			}
+			if _, diags = read(t, tc.one, f.session(t), map[string]any{"name": "nope"}); !strings.Contains(errorText(diags), "Not found") {
+				t.Errorf("not found: %q", errorText(diags))
+			}
+		})
+	}
+}
+
+// T-P10: a config that carries a secret by mistake is not shown in a plan.
+func TestInstanceConfigIsSensitive(t *testing.T) {
+	for _, name := range []string{"ligo_identity_provider", "ligo_secret_store"} {
+		d := datasourceNamed(t, name, nil)
+		var r datasource.SchemaResponse
+		d.Schema(context.Background(), datasource.SchemaRequest{}, &r)
+		if a, ok := r.Schema.Attributes["config"].(dschema.StringAttribute); !ok || !a.Sensitive {
+			t.Errorf("%s: config must be a sensitive string", name)
+		}
+		if a, ok := r.Schema.Attributes["type"].(dschema.StringAttribute); !ok || a.Sensitive {
+			t.Errorf("%s: type must not be sensitive", name)
+		}
+	}
+	for _, name := range []string{"ligo_identity_providers", "ligo_secret_stores"} {
+		d := datasourceNamed(t, name, nil)
+		var r datasource.SchemaResponse
+		d.Schema(context.Background(), datasource.SchemaRequest{}, &r)
+		items := r.Schema.Attributes["items"].(dschema.ListNestedAttribute)
+		if a, ok := items.NestedObject.Attributes["config"].(dschema.StringAttribute); !ok || !a.Sensitive {
+			t.Errorf("%s: items.config must be a sensitive string", name)
+		}
 	}
 }
