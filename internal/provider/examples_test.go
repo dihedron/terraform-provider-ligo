@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 )
 
 // Every data source has an example that parses and uses only attributes that
@@ -51,6 +52,50 @@ func TestExamples(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s does not use %s", file, m.TypeName)
+		}
+	}
+}
+
+// The resources' examples parse, and use only attributes the resources have.
+func TestResourceExamples(t *testing.T) {
+	root := filepath.Join("..", "..", "examples", "resources")
+	if _, err := os.Stat(root); err != nil {
+		t.Skip("the examples are not here (the lab runs the test binary alone)")
+	}
+	for _, mk := range (&Ligo{}).Resources(context.Background()) {
+		r := mk()
+		var m resource.MetadataResponse
+		r.Metadata(context.Background(), resource.MetadataRequest{ProviderTypeName: "ligo"}, &m)
+		var s resource.SchemaResponse
+		r.Schema(context.Background(), resource.SchemaRequest{}, &s)
+		file := filepath.Join(root, m.TypeName, "resource.tf")
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Errorf("%s has no example: %v", m.TypeName, err)
+			continue
+		}
+		f, diags := hclsyntax.ParseConfig(src, file, hcl.InitialPos)
+		if diags.HasErrors() {
+			t.Errorf("%s: %v", file, diags)
+			continue
+		}
+		found := false
+		for _, b := range f.Body.(*hclsyntax.Body).Blocks {
+			if b.Type != "resource" || b.Labels[0] != m.TypeName {
+				continue
+			}
+			found = true
+			for name := range b.Body.Attributes {
+				if _, ok := s.Schema.Attributes[name]; !ok {
+					t.Errorf("%s: %s is no attribute of %s", file, name, m.TypeName)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s does not use %s", file, m.TypeName)
+		}
+		if _, err := os.Stat(filepath.Join(root, m.TypeName, "import.sh")); err != nil {
+			t.Errorf("%s has no import example", m.TypeName)
 		}
 	}
 }

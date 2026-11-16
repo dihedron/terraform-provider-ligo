@@ -160,3 +160,74 @@ output "config" {
 		},
 	})
 }
+
+// TestAccSourceLifecycle: create, a replan that finds nothing to do, an
+// update, drift that the apply puts back, import and removal. The caller is a
+// person, so the source is not managed (managed = false).
+func TestAccSourceLifecycle(t *testing.T) {
+	l := newLigoFake(t)
+	cfg := func(desc string) string {
+		return l.hcl(t, fmt.Sprintf(`
+resource "ligo_source" "ledger" {
+  name         = "ledger-app"
+  trust_domain = "prod.example.org"
+  svid_regex   = "^spiffe://prod\\.example\\.org/ns/fin/sa/.*$"
+  description  = %q
+  managed      = false
+}
+`, desc))
+	}
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6,
+		Steps: []resource.TestStep{
+			{Config: cfg("v1"), Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr("ligo_source.ledger", "id", "ledger-app"),
+				resource.TestCheckResourceAttr("ligo_source.ledger", "revision", "1"),
+				resource.TestCheckResourceAttr("ligo_source.ledger", "state", "ACTIVE"),
+				resource.TestCheckNoResourceAttr("ligo_source.ledger", "managed_by"),
+				resource.TestCheckResourceAttrSet("ligo_source.ledger", "last_change_request"),
+			)},
+			{Config: cfg("v1"), PlanOnly: true}, // idempotent: nothing to file
+			{Config: cfg("v2"), Check: resource.TestCheckResourceAttr("ligo_source.ledger", "revision", "2")},
+			{
+				PreConfig: func() { // somebody changes it in the UI
+					l.mu.Lock()
+					l.sources["ledger-app"]["description"] = "edited by hand"
+					l.sources["ledger-app"]["metadata"].(map[string]any)["revision"] = int64(5)
+					l.mu.Unlock()
+				},
+				Config:             cfg("v2"),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+			{Config: cfg("v2"), Check: resource.TestCheckResourceAttr("ligo_source.ledger", "description", "v2")},
+			{ResourceName: "ligo_source.ledger", ImportState: true, ImportStateId: "ledger-app", ImportStateVerify: true, ImportStateVerifyIdentifierAttribute: "name",
+				ImportStateVerifyIgnore: []string{"managed", "last_change_request"}},
+		},
+	})
+	if l.sources["ledger-app"]["metadata"].(map[string]any)["state"] != "RETIRED" {
+		t.Error("destroy must retire the source")
+	}
+}
+
+// AC-P3: a person cannot own a resource, and the plan says so without calling
+// ligo for a filing.
+func TestAccPersonCannotOwn(t *testing.T) {
+	l := newLigoFake(t)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6,
+		Steps: []resource.TestStep{{
+			Config: l.hcl(t, `
+resource "ligo_source" "x" {
+  name         = "x"
+  trust_domain = "prod.example.org"
+  svid_regex   = "^x$"
+}
+`),
+			ExpectError: regexp.MustCompile(`(?s)person cannot own`),
+		}},
+	})
+	if l.count() != 0 {
+		t.Errorf("%d filings: a refused plan files nothing", l.count())
+	}
+}

@@ -29,6 +29,9 @@ type Session struct {
 	ApprovalTimeout   time.Duration
 	ApprovalReference string
 	AutomationContext map[string]any
+	DefaultManaged    bool   // the lock of the resources that do not say (spec §3.7)
+	CallerID          string // the SPIFFE ID of the caller, when it authenticates by SVID
+	Person            bool   // the caller is a person (username): it can never own a resource
 }
 
 func env(name string) string { return os.Getenv(name) }
@@ -40,7 +43,8 @@ func connect(ctx context.Context, m model) (*Session, error) {
 	if u, err := url.Parse(server); server == "" || err != nil || u.Scheme != "https" || u.Host == "" {
 		return nil, errors.New("server_url (or LIGO_SERVER_URL): an https:// URL is required")
 	}
-	s := &Session{Server: server, ApprovalTimeout: defaultApprovalTimeout, ApprovalReference: m.ApprovalReference.ValueString()}
+	s := &Session{Server: server, ApprovalTimeout: defaultApprovalTimeout, ApprovalReference: m.ApprovalReference.ValueString(),
+		DefaultManaged: m.Managed.IsNull() || m.Managed.ValueBool()}
 	if v := m.ApprovalTimeout.ValueString(); v != "" {
 		d, err := time.ParseDuration(v)
 		switch {
@@ -81,6 +85,7 @@ func connect(ctx context.Context, m model) (*Session, error) {
 			return nil, errors.New("no way to authenticate: set spiffe_socket (or SPIFFE_ENDPOINT_SOCKET), or username and password_file")
 		}
 	}
+	s.Person = user != ""
 	if user != "" {
 		password, err := readPassword(m.PasswordFile.ValueString())
 		if err != nil {
@@ -100,6 +105,9 @@ func connect(ctx context.Context, m model) (*Session, error) {
 			return nil, fmt.Errorf("spiffe_socket: %w", err)
 		}
 		cfg.X509Source = src
+		if svid, err := src.GetX509SVID(); err == nil {
+			s.CallerID = svid.ID.String()
+		}
 		if cfg.RootCAs == nil {
 			id := m.ServerID.ValueString()
 			if id == "" {
