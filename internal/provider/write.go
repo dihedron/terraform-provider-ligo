@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"math/rand/v2"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/dihedron/ligo/pkg/adminclient"
 	"github.com/dihedron/terraform-provider-ligo/internal/jsonnorm"
@@ -14,7 +18,8 @@ import (
 )
 
 // The write path, shared by every resource (spec §3.3): a mutation is a change
-// request that is filed once and waited for. Nothing here retries a write, and
+// request that is filed once and waited for. The only retry is of a filing that
+// ligo refused as rate limited (429, nothing was processed), a few times; and
 // nothing here records a change that did not happen.
 
 // filing is one write: what it changes, the payload that identifies it among
@@ -41,7 +46,7 @@ func (s *Session) apply(ctx context.Context, f filing) (adminclient.ChangeReques
 		return adminclient.ChangeRequest{}, err
 	}
 	if !found {
-		if cr, err = f.file(ctx); err != nil {
+		if cr, err = fileRetrying(ctx, f.file); err != nil {
 			return adminclient.ChangeRequest{}, writeError(f, err)
 		}
 	}
@@ -64,6 +69,47 @@ func (s *Session) apply(ctx context.Context, f filing) (adminclient.ChangeReques
 		return last, fmt.Errorf("change request %s of %s %s ended %s%s", cr.Id, strings.ToLower(f.kind), f.name, last.Status, decided(last))
 	}
 	return last, nil
+}
+
+// A 429 is refused before ligo processes anything, so filing again cannot file
+// twice. Nothing else is retried: a 503 or a reset may have been processed, and
+// the next apply finds the open request instead (T-P6).
+const (
+	filingAttempts = 3
+	maxRetryWait   = 30 * time.Second
+)
+
+// refusedBackoff is the wait before a retry when ligo gave no Retry-After; a
+// variable for the tests.
+var refusedBackoff = time.Second
+
+// fileRetrying calls file, again after a 429 for at most filingAttempts calls,
+// waiting for what ligo asked (or a growing, jittered pause) and giving up
+// when it asks for more than maxRetryWait or the context ends.
+func fileRetrying(ctx context.Context, file func(context.Context) (adminclient.ChangeRequest, error)) (adminclient.ChangeRequest, error) {
+	for attempt := 1; ; attempt++ {
+		cr, err := file(ctx)
+		var p *adminclient.Problem
+		if err == nil || !errors.As(err, &p) || p.Status != http.StatusTooManyRequests {
+			return cr, err
+		}
+		wait := p.RetryAfter
+		if wait == 0 {
+			wait = refusedBackoff << (attempt - 1)
+			wait += rand.N(wait/4 + 1) //nolint:gosec // jitter, not a secret
+		}
+		if attempt == filingAttempts || wait > maxRetryWait {
+			return cr, fmt.Errorf("rate limited by ligo after %d attempt(s): %w", attempt, err)
+		}
+		slog.WarnContext(ctx, "ligo refused the filing as rate limited; trying again", "attempt", attempt, "wait", wait)
+		t := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return cr, fmt.Errorf("interrupted while rate limited by ligo: %w", ctx.Err())
+		case <-t.C:
+		}
+	}
 }
 
 // awaiting names the sides that have not decided, with their jurisdictions.
@@ -159,6 +205,12 @@ func writeError(f filing, err error) error {
 	switch {
 	case errors.Is(err, adminclient.ErrConflict):
 		return fmt.Errorf("%s changed outside Terraform (its revision is not the one in the state): run terraform refresh or plan, and apply again; nothing was retried: %w", what, err)
+	case errors.Is(err, adminclient.ErrState) && problemSlug(err) == "resource-held":
+		return fmt.Errorf("%s is held: a person removed it in an emergency and a person lifts the hold (ligo hold list, ligo hold lift) after reviewing it. "+
+			"The provider never lifts a hold and does not file again until then: %w", what, err)
+	case errors.Is(err, adminclient.ErrState) && problemSlug(err) == "break-glass-open":
+		return fmt.Errorf("%s has an open break-glass change, which a person must have reviewed before ligo takes another change; the request is named below. "+
+			"The provider does not file over it: %w", what, err)
 	case errors.Is(err, adminclient.ErrState):
 		return fmt.Errorf("%s: ligo refuses the change in its present state (a lock, a hold, bindings that use it or a request that is pending): %w", what, err)
 	case errors.Is(err, adminclient.ErrForbidden):
@@ -166,6 +218,14 @@ func writeError(f filing, err error) error {
 	default:
 		return fmt.Errorf("filing the change of %s: %w", what, err)
 	}
+}
+
+func problemSlug(err error) string {
+	var p *adminclient.Problem
+	if errors.As(err, &p) {
+		return p.Slug()
+	}
+	return ""
 }
 
 // stateChange files a change of state (deprecate, reactivate, retire, of a
