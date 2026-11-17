@@ -32,9 +32,13 @@ type Session struct {
 	DefaultManaged    bool   // the lock of the resources that do not say (spec §3.7)
 	CallerID          string // the SPIFFE ID of the caller, when it authenticates by SVID
 	Person            bool   // the caller is a person (username): it can never own a resource
+	pace              pacer  // spaces the calls that start a write (write.go)
 }
 
 func env(name string) string { return os.Getenv(name) }
+
+// socketTimeout bounds the wait for the Workload API's first SVID.
+var socketTimeout = 20 * time.Second
 
 // connect validates the configuration and builds the session. It makes no
 // call to the server. Its errors name an attribute and never hold a password.
@@ -100,9 +104,11 @@ func connect(ctx context.Context, m model) (*Session, error) {
 			cfg.RootCAs = pool
 		}
 	} else {
-		src, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(socket)))
+		sctx, cancel := context.WithTimeout(ctx, socketTimeout)
+		src, err := workloadapi.NewX509Source(sctx, workloadapi.WithClientOptions(workloadapi.WithAddr(socket)))
+		cancel() // the context only bounds the wait for the first SVID
 		if err != nil {
-			return nil, fmt.Errorf("spiffe_socket: %w", err)
+			return nil, fmt.Errorf("spiffe_socket %s: no answer from the Workload API (is the SPIRE agent running?): %w", socket, err)
 		}
 		cfg.X509Source = src
 		if svid, err := src.GetX509SVID(); err == nil {

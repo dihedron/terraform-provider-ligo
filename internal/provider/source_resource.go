@@ -179,7 +179,9 @@ func (m *sourceModel) fill(s adminclient.Source) {
 
 // readBack reads the source the change made, to fill the computed attributes.
 func (r *sourceResource) readBack(ctx context.Context, m *sourceModel, cr string, diags *diag.Diagnostics) bool {
-	s, err := r.session.Client.GetSource(ctx, m.Name.ValueString())
+	s, err := paced(ctx, r.session, func(ctx context.Context) (adminclient.SourceDetail, error) {
+		return r.session.Client.GetSource(ctx, m.Name.ValueString())
+	})
 	if err != nil {
 		diags.AddError("Cannot read the source after the change", err.Error())
 		return false
@@ -245,7 +247,9 @@ func (r *sourceResource) Read(ctx context.Context, req resource.ReadRequest, res
 	if resp.Diagnostics.Append(req.State.Get(ctx, &st)...); resp.Diagnostics.HasError() {
 		return
 	}
-	s, err := r.session.Client.GetSource(ctx, st.Name.ValueString())
+	s, err := paced(ctx, r.session, func(ctx context.Context) (adminclient.SourceDetail, error) {
+		return r.session.Client.GetSource(ctx, st.Name.ValueString())
+	})
 	if errors.Is(err, adminclient.ErrNotFound) || (err == nil && s.Metadata.State == "RETIRED") {
 		resp.State.RemoveResource(ctx) // gone, or retired by somebody else
 		return

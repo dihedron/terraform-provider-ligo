@@ -68,8 +68,9 @@ func (r *bindingResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			"source":       schema.StringAttribute{Required: true, PlanModifiers: replace, Description: "The source that is given the access; a binding does not move to another."},
 			"target":       schema.StringAttribute{Required: true, PlanModifiers: replace, Description: "The target that is reached; a binding does not move to another."},
 			"access_level": schema.StringAttribute{Required: true, Description: "The access level of the target that is granted."},
-			"parameters": schema.StringAttribute{Optional: true, PlanModifiers: []planmodifier.String{sameJSON{}},
-				Description: "The parameters of the access, as JSON text (jsonencode); the platform's form says which. They are checked against it when the plan can read it."},
+			"parameters": schema.StringAttribute{Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown(), sameJSON{}},
+				Description: "The parameters of the access, as JSON text (jsonencode); the platform's form says which. They are checked against it when the plan can read it. " +
+					"When the configuration has none, they are what the platform defaults to, as ligo answers them."},
 			"purpose":    schema.StringAttribute{Optional: true, Description: "Why the binding exists."},
 			"expires_at": schema.StringAttribute{Optional: true, Description: "When the binding expires, as an RFC 3339 time."},
 			"labels":     schema.MapAttribute{Optional: true, ElementType: types.StringType, Description: "Labels."},
@@ -173,7 +174,9 @@ func (m *bindingModel) fill(b adminclient.BindingDetail) error {
 }
 
 func (r *bindingResource) readBack(ctx context.Context, m *bindingModel, cr string, diags *diag.Diagnostics) bool {
-	b, err := r.session.Client.GetBinding(ctx, m.Name.ValueString())
+	b, err := paced(ctx, r.session, func(ctx context.Context) (adminclient.BindingDetail, error) {
+		return r.session.Client.GetBinding(ctx, m.Name.ValueString())
+	})
 	if err == nil {
 		err = m.fill(b)
 	}
@@ -226,7 +229,9 @@ func (r *bindingResource) Read(ctx context.Context, req resource.ReadRequest, re
 	if resp.Diagnostics.Append(req.State.Get(ctx, &st)...); resp.Diagnostics.HasError() {
 		return
 	}
-	b, err := r.session.Client.GetBinding(ctx, st.Name.ValueString())
+	b, err := paced(ctx, r.session, func(ctx context.Context) (adminclient.BindingDetail, error) {
+		return r.session.Client.GetBinding(ctx, st.Name.ValueString())
+	})
 	if errors.Is(err, adminclient.ErrNotFound) {
 		resp.State.RemoveResource(ctx)
 		return

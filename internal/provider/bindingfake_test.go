@@ -114,6 +114,9 @@ func (l *ligoFake) applyBinding(name, op string, body map[string]any) {
 			delete(b, k)
 		}
 	}
+	if _, ok := b["parameters"]; !ok {
+		b["parameters"] = map[string]any{"connectionLimit": float64(0)} // what a platform's form defaults to
+	}
 	if m, ok := body["managed"].(bool); ok {
 		if m {
 			md["managedBy"] = l.owner

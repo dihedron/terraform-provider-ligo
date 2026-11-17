@@ -45,7 +45,7 @@ resource "ligo_binding" "ledger_app_reads" {
 - `expires_at` (String) When the binding expires, as an RFC 3339 time.
 - `labels` (Map of String) Labels.
 - `managed` (Boolean) Whether this automation owns it (the lock): only the owner then changes it. Default: the provider's managed. false, on one that is managed, is the owner's release.
-- `parameters` (String) The parameters of the access, as JSON text (jsonencode); the platform's form says which. They are checked against it when the plan can read it.
+- `parameters` (String) The parameters of the access, as JSON text (jsonencode); the platform's form says which. They are checked against it when the plan can read it. When the configuration has none, they are what the platform defaults to, as ligo answers them.
 - `purpose` (String) Why the binding exists.
 
 ### Read-Only

@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dihedron/ligo/pkg/adminclient"
@@ -46,7 +47,25 @@ func (s *Session) apply(ctx context.Context, f filing) (adminclient.ChangeReques
 		return adminclient.ChangeRequest{}, err
 	}
 	if !found {
-		if cr, err = fileRetrying(ctx, f.file); err != nil {
+		file := func(ctx context.Context) (adminclient.ChangeRequest, error) {
+			if err := s.pace.wait(ctx); err != nil {
+				return adminclient.ChangeRequest{}, err
+			}
+			cr, err := f.file(ctx)
+			if d, ok := refusedFor(err); ok {
+				s.pace.slowDown(d)
+			}
+			return cr, err
+		}
+		cr, err = fileRetrying(ctx, file)
+		if err != nil && problemSlug(err) == "invalid-transition" {
+			// the resource exists: a create whose answer was lost? what this caller filed, applied and that says the same is adopted
+			if prev, ok := s.appliedEarlier(ctx, f); ok {
+				slog.WarnContext(ctx, "the resource exists: adopting the change request this caller filed and ligo applied", "kind", f.kind, "name", f.name, "change_request", prev.Id)
+				cr, err = prev, nil
+			}
+		}
+		if err != nil {
 			return adminclient.ChangeRequest{}, writeError(f, err)
 		}
 	}
@@ -78,6 +97,76 @@ const (
 	filingAttempts = 3
 	maxRetryWait   = 30 * time.Second
 )
+
+// pacer spaces the calls that start a write (the lookup of an open request, the
+// filing) and holds all of them back when ligo says to slow down: ligo limits a
+// principal to about ten requests a second, and a run of dozens of resources,
+// applied ten at a time by Terraform, goes over that (found by the pre-release
+// campaign: a destroy of 60 sources failed on 429). It is the session's, so
+// every resource of the run shares it. The zero value paces at paceGap.
+type pacer struct {
+	mu    sync.Mutex
+	gap   time.Duration // 0: paceGap
+	next  time.Time     // the earliest start of the next call
+	until time.Time     // nothing starts before this: ligo asked for it
+}
+
+// paceGap keeps a run under about seven requests a second of the ten ligo allows
+// the principal, which the waits of the change requests share.
+const paceGap = 150 * time.Millisecond
+
+// wait returns when the caller may start a call, or when the context ends.
+func (p *pacer) wait(ctx context.Context) error {
+	p.mu.Lock()
+	gap := p.gap
+	if gap == 0 {
+		gap = paceGap
+	}
+	at := time.Now()
+	if p.next.After(at) {
+		at = p.next
+	}
+	if p.until.After(at) {
+		at = p.until
+	}
+	p.next = at.Add(gap)
+	p.mu.Unlock()
+	d := time.Until(at)
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// slowDown holds every call back for d: ligo answered 429.
+func (p *pacer) slowDown(d time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if at := time.Now().Add(d); at.After(p.until) {
+		p.until = at
+	}
+}
+
+// refusedFor is how long to hold back after a 429: what ligo asked for, or a
+// second, and never more than maxRetryWait.
+func refusedFor(err error) (time.Duration, bool) {
+	var p *adminclient.Problem
+	if !errors.As(err, &p) || p.Status != http.StatusTooManyRequests {
+		return 0, false
+	}
+	d := p.RetryAfter
+	if d <= 0 {
+		d = time.Second
+	}
+	return min(d, maxRetryWait), true
+}
 
 // refusedBackoff is the wait before a retry when ligo gave no Retry-After; a
 // variable for the tests.
@@ -146,6 +235,42 @@ func decided(cr adminclient.ChangeRequest) string {
 // pending finds the request that is still open for the resource. found says
 // there is one; same says that it asks for what f asks for (T-P6).
 func (s *Session) pending(ctx context.Context, f filing) (cr adminclient.ChangeRequest, found, same bool, err error) {
+	// a read is safe to repeat: after the client's own retries, a 429 holds the session back and the lookup goes again
+	for attempt := 1; ; attempt++ {
+		if err = s.pace.wait(ctx); err != nil {
+			return cr, false, false, err
+		}
+		cr, found, same, err = s.pendingOnce(ctx, f)
+		d, limited := refusedFor(err)
+		if !limited || attempt == lookupAttempts {
+			return cr, found, same, err
+		}
+		s.pace.slowDown(d)
+	}
+}
+
+// paced is a read that waits its turn and, when ligo still answers 429 after the
+// client's own retries, goes again (a refresh of dozens of resources, ten at a
+// time, is over ligo's limit otherwise).
+func paced[T any](ctx context.Context, s *Session, call func(context.Context) (T, error)) (T, error) {
+	var zero T
+	for attempt := 1; ; attempt++ {
+		if err := s.pace.wait(ctx); err != nil {
+			return zero, err
+		}
+		v, err := call(ctx)
+		d, limited := refusedFor(err)
+		if !limited || attempt == lookupAttempts {
+			return v, err
+		}
+		s.pace.slowDown(d)
+	}
+}
+
+// lookupAttempts bounds the lookup of an open request that ligo rate limits.
+const lookupAttempts = 5
+
+func (s *Session) pendingOnce(ctx context.Context, f filing) (cr adminclient.ChangeRequest, found, same bool, err error) {
 	for open, err := range s.Client.ListChangeRequests(ctx, adminclient.ChangeRequestFilter{Status: "PENDING", ResourceType: f.kind, ResourceName: f.name}) {
 		if err != nil {
 			return cr, false, false, fmt.Errorf("looking for an open change request of %s %s: %w", strings.ToLower(f.kind), f.name, err)
@@ -157,6 +282,34 @@ func (s *Session) pending(ctx context.Context, f filing) (cr adminclient.ChangeR
 		return full, true, full.Payload != nil && covers(*full.Payload, f.payload), nil
 	}
 	return cr, false, false, nil
+}
+
+// appliedEarlier finds the change request that created the resource: filed by
+// this caller (a pipeline, known by its SPIFFE ID), applied, with a payload
+// that says what f says. It is what a create whose answer was lost left behind
+// (a replica killed, a runner cut off); anything else is somebody else's.
+func (s *Session) appliedEarlier(ctx context.Context, f filing) (adminclient.ChangeRequest, bool) {
+	if s.CallerID == "" || f.payload == nil {
+		return adminclient.ChangeRequest{}, false
+	}
+	if err := s.pace.wait(ctx); err != nil {
+		return adminclient.ChangeRequest{}, false
+	}
+	checked := 0
+	for open, err := range s.Client.ListChangeRequests(ctx, adminclient.ChangeRequestFilter{Status: "APPLIED", ResourceType: f.kind, ResourceName: f.name}) {
+		if err != nil || checked == 5 {
+			break
+		}
+		checked++
+		if string(open.Operation) != "CREATE" || open.RequestedBy != s.CallerID {
+			continue
+		}
+		full, err := s.Client.GetChangeRequest(ctx, open.Id.String())
+		if err == nil && full.Payload != nil && covers(*full.Payload, f.payload) {
+			return full, true
+		}
+	}
+	return adminclient.ChangeRequest{}, false
 }
 
 // openRequest is the pending request that apply waits for instead of filing
@@ -213,6 +366,9 @@ func writeError(f filing, err error) error {
 	case errors.Is(err, adminclient.ErrState) && problemSlug(err) == "break-glass-open":
 		return fmt.Errorf("%s has an open break-glass change, which a person must have reviewed before ligo takes another change; the request is named below. "+
 			"The provider does not file over it: %w", what, err)
+	case errors.Is(err, adminclient.ErrState) && problemSlug(err) == "invalid-transition":
+		return fmt.Errorf("%s exists in ligo, and this run did not create it with this content: if it is the one the configuration means, bring it into the state "+
+			"(terraform import, with the name as the ID) and apply again; otherwise choose another name: %w", what, err)
 	case errors.Is(err, adminclient.ErrState):
 		return fmt.Errorf("%s: ligo refuses the change in its present state (a lock, a hold, bindings that use it or a request that is pending): %w", what, err)
 	case errors.Is(err, adminclient.ErrForbidden):

@@ -20,6 +20,7 @@ func ligoSession(t *testing.T, l *ligoFake, wait time.Duration) *Session {
 	t.Helper()
 	s := l.session(t)
 	s.Person, s.CallerID, s.DefaultManaged, s.ApprovalTimeout = false, callerID, true, wait
+	s.pace.gap = time.Millisecond // the tests do not wait for ligo's rate limit
 	return s
 }
 

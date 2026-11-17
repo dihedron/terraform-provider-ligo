@@ -340,7 +340,9 @@ func (r *instanceResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 	name := st.base().Name.ValueString()
-	i, err := r.kind.get(r.session.Client, ctx, name)
+	i, err := paced(ctx, r.session, func(ctx context.Context) (adminclient.Instance, error) {
+		return r.kind.get(r.session.Client, ctx, name)
+	})
 	if errors.Is(err, adminclient.ErrNotFound) {
 		resp.State.RemoveResource(ctx)
 		return

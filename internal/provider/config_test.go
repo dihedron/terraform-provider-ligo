@@ -289,3 +289,22 @@ func TestBadServerIDWithPassword(t *testing.T) {
 		t.Fatalf("diagnostics: %s", errorText(resp.Diagnostics))
 	}
 }
+
+// With no agent behind the socket, connect gives up after socketTimeout.
+func TestConnectWithoutAgentFailsFast(t *testing.T) {
+	old := socketTimeout
+	socketTimeout = 300 * time.Millisecond
+	defer func() { socketTimeout = old }()
+	a := newAdmin(t)
+	m := model{ServerURL: types.StringValue(a.URL), SpiffeSocket: types.StringValue("unix://" + filepath.Join(t.TempDir(), "none.sock"))}
+	done := make(chan error, 1)
+	go func() { _, err := connect(context.Background(), m); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "spiffe_socket") || !strings.Contains(err.Error(), "Workload API") {
+			t.Fatalf("err = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("connect did not return")
+	}
+}
