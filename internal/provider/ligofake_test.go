@@ -41,6 +41,7 @@ type ligoFake struct {
 	failing      bool              // a binding ends FAILED
 	refuse       map[int]int       // a status to answer to the next n filings, before they are processed (429, 503)
 	attempts     int               // every POST and PUT that arrived, filed or refused
+	refuseReads  int               // the next n reads of change requests are answered 429, as ligo's rate limit does
 }
 
 func newLigoFake(t *testing.T) *ligoFake {
@@ -135,6 +136,9 @@ func (l *ligoFake) change(r *http.Request, typ, name, op, level string) (int, st
 		return 422, `{"type":"urn:ligo:problem:validation-failed","title":"invalid","status":422,"detail":"body: json: unknown field \"managed\""}`
 	}
 	cur := store[name]
+	if cur != nil && op == "CREATE" {
+		return 409, `{"type":"urn:ligo:problem:invalid-transition","title":"invalid transition","status":409,"detail":"metadata.name \"` + name + `\" is in use: a change of it needs expectedRevision"}`
+	}
 	if cur != nil {
 		if mb, _ := cur["metadata"].(map[string]any)["managedBy"].(string); mb != "" && mb != l.owner {
 			return 409, `{"type":"urn:ligo:problem:resource-managed","title":"resource managed","status":409,"detail":"managed by another"}`
@@ -157,7 +161,7 @@ func (l *ligoFake) change(r *http.Request, typ, name, op, level string) (int, st
 	l.filings++
 	id := l.id()
 	cr := map[string]any{"id": id, "resourceType": typ, "resourceName": name, "resourceId": nil, "operation": op, "kind": "STANDARD", "consent": "ALL",
-		"status": "PENDING", "dependsOn": nil, "policySha256": "ab", "distinctApproversRequired": false, "payloadSha256": "cd", "requestedBy": "ci",
+		"status": "PENDING", "dependsOn": nil, "policySha256": "ab", "distinctApproversRequired": false, "payloadSha256": "cd", "requestedBy": l.owner,
 		"requestedAt": "2026-11-14T10:00:00Z", "expiresAt": "2026-11-15T10:00:00Z", "awaitingApproval": []string{"SOURCE"},
 		"sides": []any{map[string]any{"side": "SOURCE", "jurisdiction": "dc/corp-prod", "basis": "APPROVAL"}}, "payload": body, "level": level}
 	l.crs[id], l.order = cr, append(l.order, id)
@@ -288,6 +292,10 @@ func (l *ligoFake) decide(id, status string) {
 func (l *ligoFake) listCRs(r *http.Request) (int, string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.refuseReads > 0 {
+		l.refuseReads--
+		return http.StatusTooManyRequests, `{"type":"urn:ligo:problem:rate-limited","title":"slow down","status":429}`
+	}
 	q := r.URL.Query()
 	var items []string
 	for _, id := range l.order {
@@ -328,4 +336,16 @@ func (l *ligoFake) count() (filings int) {
 // tfNull is the null state of a schema, before a resource exists.
 func tfNull(sch resource.SchemaResponse) tftypes.Value {
 	return tftypes.NewValue(sch.Schema.Type().TerraformType(context.Background()), nil)
+}
+
+// seedSource makes a source exist with no change request in the list: one that
+// somebody else, or an older run, filed.
+func (l *ligoFake) seedSource(name string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	id := l.id()
+	l.crs[id] = map[string]any{"id": id, "resourceType": "SOURCE", "resourceName": name, "operation": "CREATE", "level": "",
+		"payload": map[string]any{"metadata": map[string]any{"name": name}, "identity": map[string]any{"trustDomain": "prod.lab", "svidRegex": "^z$"}, "visibility": map[string]any{"mode": "PRIVATE"}}}
+	l.apply(id)
+	delete(l.crs, id)
 }

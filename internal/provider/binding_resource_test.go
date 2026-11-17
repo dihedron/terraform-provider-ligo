@@ -433,3 +433,28 @@ func TestBindingConfigureRejectsOtherData(t *testing.T) {
 	}
 	r.Configure(context.Background(), resource.ConfigureRequest{}, &resp)
 }
+
+// A binding without parameters in the configuration gets the platform's
+// defaults from ligo: the attribute is computed, or Terraform refuses the
+// result as inconsistent (found by the pre-release campaign on the real ligo).
+func TestBindingParametersAreComputed(t *testing.T) {
+	_, sch := bndRes(t, &Session{})
+	a, ok := sch.Schema.Attributes["parameters"]
+	if !ok || !a.IsOptional() || !a.IsComputed() {
+		t.Fatalf("parameters: optional %v, computed %v; want both", a.IsOptional(), a.IsComputed())
+	}
+}
+
+func TestBindingWithoutParametersKeepsTheServersDefaults(t *testing.T) {
+	l := newLigoFake(t)
+	r, sch := bndRes(t, ligoSession(t, l, 20*time.Second))
+	plan := plannedBinding("b-defaults")
+	plan.Parameters = types.StringUnknown()
+	got, resp := createBinding(t, r, sch, plan)
+	if resp.Diagnostics.HasError() {
+		t.Fatal(errorText(resp.Diagnostics))
+	}
+	if got.Parameters.ValueString() != `{"connectionLimit":0}` {
+		t.Errorf("parameters %v, want the platform's default", got.Parameters)
+	}
+}

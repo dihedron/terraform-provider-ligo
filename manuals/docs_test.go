@@ -92,6 +92,7 @@ func TestQuotedMessagesAreInTheCode(t *testing.T) {
 		"is still used",
 		"ligo refuses the change in its present state",
 		"the caller may not file this change",
+		"exists in ligo, and this run did not create it",
 		"rate limited by ligo after",
 		"interrupted while waiting for change request",
 		"server_url (or LIGO_SERVER_URL): an https:// URL is required",

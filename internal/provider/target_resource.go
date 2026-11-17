@@ -277,7 +277,9 @@ func keepIfSame(prior types.String, normal string) types.String {
 }
 
 func (r *targetResource) readBack(ctx context.Context, m *targetModel, cr string, diags *diag.Diagnostics) bool {
-	t, err := r.session.Client.GetTarget(ctx, m.Name.ValueString())
+	t, err := paced(ctx, r.session, func(ctx context.Context) (adminclient.TargetDetail, error) {
+		return r.session.Client.GetTarget(ctx, m.Name.ValueString())
+	})
 	if err != nil {
 		diags.AddError("Cannot read the target after the change", err.Error())
 		return false
@@ -391,7 +393,9 @@ func (r *targetResource) Read(ctx context.Context, req resource.ReadRequest, res
 	if resp.Diagnostics.Append(req.State.Get(ctx, &st)...); resp.Diagnostics.HasError() {
 		return
 	}
-	t, err := r.session.Client.GetTarget(ctx, st.Name.ValueString())
+	t, err := paced(ctx, r.session, func(ctx context.Context) (adminclient.TargetDetail, error) {
+		return r.session.Client.GetTarget(ctx, st.Name.ValueString())
+	})
 	if errors.Is(err, adminclient.ErrNotFound) || (err == nil && t.Metadata.State == "RETIRED") {
 		resp.State.RemoveResource(ctx)
 		return
@@ -474,7 +478,9 @@ func (r *targetResource) keptLevels(ctx context.Context, name string, st targetM
 		}
 		out = append(out, l)
 	}
-	t, err := r.session.Client.GetTarget(ctx, name)
+	t, err := paced(ctx, r.session, func(ctx context.Context) (adminclient.TargetDetail, error) {
+		return r.session.Client.GetTarget(ctx, name)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("reading the access levels of %s: %w", name, err)
 	}

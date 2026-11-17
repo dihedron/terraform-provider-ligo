@@ -35,4 +35,8 @@ Platforms, identity providers and secret stores always wait for a person, and ar
 
 ## Rate limiting
 
-When `ligo` answers 429 to a filing, the provider tries again after `Retry-After`, at most 3 attempts in all, and never when the wait is longer than 30 seconds. Nothing else is retried: a 503, a reset or a time-out may have been processed, and the next apply finds the open request instead.
+`ligo` limits a principal to about ten requests a second, and Terraform applies ten resources at a time. The provider spaces the calls that start a write (the lookup of an open request, the filing) across the whole run, and when `ligo` answers 429 it holds every one of them back for `Retry-After` (a second when none is given, at most 30 seconds). A filing refused that way is tried again, at most 3 attempts in all; a lookup, which only reads, at most 5. Nothing else is retried: a 503, a reset or a time-out may have been processed, and the next apply finds the open request instead.
+
+## A create whose answer was lost
+
+If a replica dies, or the runner is cut off, after `ligo` applied a create and before Terraform saved it, the resource exists and the state does not know it. The next apply finds the name taken. When the pipeline's own applied request for that name says what the configuration says, the provider adopts it and files nothing; otherwise it stops with `exists in ligo, and this run did not create it`, and a person decides whether to `terraform import` it. A person's runs (LDAP) are never adopted this way: the provider cannot tell who they were.

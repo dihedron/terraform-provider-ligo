@@ -16,6 +16,7 @@
 | `is still used` (`instance-in-use`) | Targets, bindings or a platform use the instance | Retire them first |
 | `ligo refuses the change in its present state` | A lock, a hold, bindings or a pending request | Read the problem's detail |
 | `the caller may not file this change` | 403: the role does not cover the jurisdiction | Check the roles and the jurisdictions |
+| `exists in ligo, and this run did not create it` | A create found the name taken, and no request of this caller created it with this content | If it is the one the configuration means, `terraform import` it; otherwise choose another name |
 | `rate limited by ligo after N attempt(s)` | 429 beyond the retries | Wait, then apply again |
 | `interrupted while waiting for change request` | The run was cancelled | The request stays open; apply again |
 
