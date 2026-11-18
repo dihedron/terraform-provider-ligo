@@ -1,7 +1,7 @@
 # The ligo Terraform and OpenTofu provider
 
-- **Version:** 0.2 (2026-11-16), draft for the user's approval (v0.1 of 2026-11-15 had the lock as an open point; §3.7 is now written from what `ligo` v0.7.0 shipped, and open points 2 to 4 have their defaults); nothing is implemented until it is approved (AGENTS.md rules 1 and 3).
-- **Backlog:** `ligo/.specs/ligo-backlog.md`, item 8
+- **Version:** 0.2 (2026-11-16), approved and implemented: released as v0.1.0 on 2026-11-17 (chunks 0 to 6 done; the pre-release campaign is in `ligo-prerelease-campaign.md`). What is left before v0.2.0 and the registries is in `ligo-provider-backlog.md`.
+- **Backlog:** `ligo/.specs/ligo-backlog.md`, item 8; the provider's own: `.specs/ligo-provider-backlog.md`
 - **Depends on:** `ligo/.specs/ligo-adminclient.md` (approved, built, `pkg/adminclient` in the `ligo` module), and `ligo/.specs/ligo-managed-resources.md` (the lock, ADR-17: built and released in `ligo` v0.7.0, which the provider pins)
 - **Decisions of the user (2026-11-14 and 2026-11-15):** instances are in scope, as data sources first and then as resources that file a request and wait; the lock "managed by automation" is specified and built in `ligo` before the provider's resources; the provider authenticates with the SPIFFE Workload API or with LDAP Basic credentials; a removal from the configuration files the deletion and waits for it; the provider is a separate repository, on `terraform-plugin-framework`.
 
