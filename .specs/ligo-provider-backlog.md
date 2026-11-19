@@ -26,6 +26,8 @@ Work agreed for later. An item here is not a specification: each needs its own, 
 
 **Why.** v0.1.0 is a GitHub release only (signed zips, the checksums, the manifest and the three PDF guides). Publishing to the registries makes the provider installable by every user without a manual mirror, and it is hard to take back: a published version cannot be replaced, and users' lock files pin its checksums.
 
+**Together with PyPI.** The Python SDK's publication on PyPI (`ligo` backlog item 22) waits for the same condition and should go out in the same stable moment.
+
 **The user's condition (2026-11-18).** Done only when the whole ecosystem is stable and no more changes are being made to `ligo` and to the SPIFFE plugins (`lxd-spiffe`, `openstack-spiffe`): a provider on a registry is a promise about the `ligo` versions it supports (spec §8 point 4).
 
 **What it needs, when the time comes.**
