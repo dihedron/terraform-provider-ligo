@@ -32,11 +32,11 @@ output "owner" {
 
 ### Read-Only
 
+- `annotations` (Map of String) Free-form key-value text, not interpreted by ligo.
 - `bindings` (Number) How many bindings use it.
 - `description` (String) What it is.
 - `display_name` (String) A name for people.
 - `jurisdiction` (String) The jurisdiction, derived from the regex.
-- `labels` (Map of String) Labels.
 - `managed_by` (String) The SPIFFE ID of the automation that manages it (the lock); empty when nobody does.
 - `pending_change_request_id` (String) A change request of it that is still pending, if any.
 - `revision` (Number) The revision; an update must name it.

@@ -44,7 +44,7 @@ type targetModel struct {
 	Definition        types.String `tfsdk:"definition"`
 	AccessLevels      types.Map    `tfsdk:"access_levels"`
 	NetworkFlows      types.String `tfsdk:"network_flows"`
-	Labels            types.Map    `tfsdk:"labels"`
+	Annotations       types.Map    `tfsdk:"annotations"`
 	Visibility        types.String `tfsdk:"visibility"`
 	VisibleTo         types.List   `tfsdk:"visible_to"`
 	State             types.String `tfsdk:"state"`
@@ -111,7 +111,7 @@ func (r *targetResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 						Description: "ACTIVE (the default) or DEPRECATED. A level that leaves the map is retired."},
 				}}},
 			"network_flows": schema.StringAttribute{Optional: true, PlanModifiers: same, Description: "The network flows the target needs, as JSON text."},
-			"labels":        schema.MapAttribute{Optional: true, ElementType: types.StringType, Description: "Labels."},
+			"annotations":   schema.MapAttribute{Optional: true, ElementType: types.StringType, Description: "Free-form key-value text, not interpreted by ligo."},
 			"visibility":    schema.StringAttribute{Optional: true, Computed: true, PlanModifiers: keep, Description: "Who may see it in the catalog: PUBLIC, PRIVATE or SELECTED. Default: ligo's."},
 			"visible_to":    schema.ListAttribute{Optional: true, ElementType: types.StringType, Description: "With SELECTED, the jurisdiction patterns that may see it."},
 			"state":         schema.StringAttribute{Optional: true, Computed: true, PlanModifiers: keep, Description: "ACTIVE (the default) or DEPRECATED (no new bindings). Removal retires it."},
@@ -203,8 +203,8 @@ func (m targetModel) body(keep func(string) bool, extra ...any) map[string]any {
 	if v := jsonOrNil(m.NetworkFlows); v != nil {
 		b["networkFlows"] = v
 	}
-	if l := strMap(m.Labels); l != nil {
-		b["labels"] = *l
+	if l := strMap(m.Annotations); l != nil {
+		b["annotations"] = *l
 	}
 	if v := optStr(m.Visibility); v != nil {
 		vis := map[string]any{"mode": *v}
@@ -410,7 +410,7 @@ func (r *targetResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 	st.DisplayName, st.Description = types.StringPointerValue(t.DisplayName), types.StringPointerValue(t.Description)
 	st.DocumentationURL = types.StringPointerValue(t.DocumentationUrl)
-	st.Labels = labelsOrNull(t.Labels, st.Labels)
+	st.Annotations = annotationsOrNull(t.Annotations, st.Annotations)
 	if t.Visibility.VisibleTo != nil {
 		st.VisibleTo = listOf(*t.Visibility.VisibleTo)
 	}

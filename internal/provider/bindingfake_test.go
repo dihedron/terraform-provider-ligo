@@ -107,7 +107,7 @@ func (l *ligoFake) applyBinding(name, op string, body map[string]any) {
 	}
 	md := b["metadata"].(map[string]any)
 	md["revision"] = md["revision"].(int64) + 1
-	for _, k := range []string{"source", "target", "accessLevel", "parameters", "purpose", "expiresAt", "labels"} {
+	for _, k := range []string{"source", "target", "accessLevel", "parameters", "description", "expiresAt", "annotations"} {
 		if v, ok := body[k]; ok {
 			b[k] = v
 		} else {

@@ -40,9 +40,9 @@ type bindingModel struct {
 	Target            types.String `tfsdk:"target"`
 	AccessLevel       types.String `tfsdk:"access_level"`
 	Parameters        types.String `tfsdk:"parameters"`
-	Purpose           types.String `tfsdk:"purpose"`
+	Description       types.String `tfsdk:"description"`
 	ExpiresAt         types.String `tfsdk:"expires_at"`
-	Labels            types.Map    `tfsdk:"labels"`
+	Annotations       types.Map    `tfsdk:"annotations"`
 	Managed           types.Bool   `tfsdk:"managed"`
 	Revision          types.Int64  `tfsdk:"revision"`
 	ManagedBy         types.String `tfsdk:"managed_by"`
@@ -71,9 +71,9 @@ func (r *bindingResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			"parameters": schema.StringAttribute{Optional: true, Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown(), sameJSON{}},
 				Description: "The parameters of the access, as JSON text (jsonencode); the platform's form says which. They are checked against it when the plan can read it. " +
 					"When the configuration has none, they are what the platform defaults to, as ligo answers them."},
-			"purpose":    schema.StringAttribute{Optional: true, Description: "Why the binding exists."},
-			"expires_at": schema.StringAttribute{Optional: true, Description: "When the binding expires, as an RFC 3339 time."},
-			"labels":     schema.MapAttribute{Optional: true, ElementType: types.StringType, Description: "Labels."},
+			"description": schema.StringAttribute{Optional: true, Description: "What the binding is for, in plain text; ligo sends it to the workload."},
+			"expires_at":  schema.StringAttribute{Optional: true, Description: "When the binding expires, as an RFC 3339 time."},
+			"annotations": schema.MapAttribute{Optional: true, ElementType: types.StringType, Description: "Free-form key-value text, not interpreted by ligo."},
 			"managed": schema.BoolAttribute{Optional: true, Description: "Whether this automation owns it (the lock): only the owner then changes it. Default: the provider's managed. " +
 				"false, on one that is managed, is the owner's release."},
 			"revision":   schema.Int64Attribute{Computed: true, Description: "The revision; an update names it, and ligo refuses a stale one."},
@@ -126,14 +126,14 @@ func (m bindingModel) body() map[string]any {
 	if v := jsonOrNil(m.Parameters); v != nil {
 		b["parameters"] = v
 	}
-	if v := optStr(m.Purpose); v != nil {
-		b["purpose"] = *v
+	if v := optStr(m.Description); v != nil {
+		b["description"] = *v
 	}
 	if v := instant(m.ExpiresAt); v != nil {
 		b["expiresAt"] = *v
 	}
-	if l := strMap(m.Labels); l != nil {
-		b["labels"] = *l
+	if l := strMap(m.Annotations); l != nil {
+		b["annotations"] = *l
 	}
 	return b
 }
@@ -153,8 +153,8 @@ func (m *bindingModel) fill(b adminclient.BindingDetail) error {
 	m.Source, m.Target, m.AccessLevel = types.StringValue(b.Source), types.StringValue(b.Target), types.StringValue(b.AccessLevel)
 	m.Revision, m.ManagedBy = types.Int64Value(b.Metadata.Revision), types.StringPointerValue(b.Metadata.ManagedBy)
 	m.Phase, m.PhaseMessage = types.StringValue(string(b.Status.Phase)), types.StringValue(b.Status.Message)
-	m.Purpose = types.StringPointerValue(b.Purpose)
-	m.Labels = labelsOrNull(b.Labels, m.Labels)
+	m.Description = types.StringPointerValue(b.Description)
+	m.Annotations = annotationsOrNull(b.Annotations, m.Annotations)
 	parameters, expires := m.Parameters, m.ExpiresAt
 	m.Parameters, m.ExpiresAt = types.StringNull(), types.StringNull()
 	if p, ok := b.Parameters.(map[string]any); ok && len(p) > 0 {

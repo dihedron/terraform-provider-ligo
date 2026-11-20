@@ -24,7 +24,7 @@ func bndRes(t *testing.T, s *Session) (*bindingResource, resource.SchemaResponse
 func plannedBinding(name string) bindingModel {
 	return bindingModel{
 		ID: types.StringUnknown(), Name: types.StringValue(name), Source: types.StringValue("ledger-app"), Target: types.StringValue("ledger"), AccessLevel: types.StringValue("read"),
-		Parameters: types.StringValue(`{"connectionLimit":5}`), Purpose: types.StringNull(), ExpiresAt: types.StringNull(), Labels: types.MapNull(types.StringType), Managed: types.BoolNull(),
+		Parameters: types.StringValue(`{"connectionLimit":5}`), Description: types.StringNull(), ExpiresAt: types.StringNull(), Annotations: types.MapNull(types.StringType), Managed: types.BoolNull(),
 		Revision: types.Int64Unknown(), ManagedBy: types.StringUnknown(), LastChangeRequest: types.StringUnknown(), Phase: types.StringUnknown(), PhaseMessage: types.StringUnknown(),
 	}
 }
@@ -148,13 +148,13 @@ func TestBindingUpdateSendsTheRevisionAndWaits(t *testing.T) {
 	r, sch := bndRes(t, ligoSession(t, l, 20*time.Second))
 	st := madeBinding(t, r, sch, plannedBinding("b"))
 	plan := st
-	plan.Parameters, plan.Purpose = types.StringValue(`{"connectionLimit":9}`), types.StringValue("reporting")
+	plan.Parameters, plan.Description = types.StringValue(`{"connectionLimit":9}`), types.StringValue("reporting")
 	plan.Revision, plan.Phase, plan.PhaseMessage = types.Int64Unknown(), types.StringUnknown(), types.StringUnknown()
 	got, resp := updateBinding(t, r, sch, st, plan)
 	if resp.Diagnostics.HasError() {
 		t.Fatal(errorText(resp.Diagnostics))
 	}
-	if got.Revision.ValueInt64() != 2 || got.Phase.ValueString() != "ACTIVE" || got.Purpose.ValueString() != "reporting" || got.Parameters.ValueString() != `{"connectionLimit":9}` {
+	if got.Revision.ValueInt64() != 2 || got.Phase.ValueString() != "ACTIVE" || got.Description.ValueString() != "reporting" || got.Parameters.ValueString() != `{"connectionLimit":9}` {
 		t.Errorf("state %+v", got)
 	}
 	if p := l.crs[l.order[1]]["payload"].(map[string]any); p["expectedRevision"] != float64(1) {
@@ -170,7 +170,7 @@ func TestBindingStaleRevisionIsNotRetried(t *testing.T) {
 	l.bindings["b"]["metadata"].(map[string]any)["revision"] = int64(7)
 	l.mu.Unlock()
 	plan := st
-	plan.Purpose = types.StringValue("x")
+	plan.Description = types.StringValue("x")
 	_, resp := updateBinding(t, r, sch, st, plan)
 	if msg := errorText(resp.Diagnostics); !strings.Contains(msg, "changed outside Terraform") {
 		t.Fatalf("diagnostics: %q", msg)
@@ -210,7 +210,7 @@ func TestBindingHoldAndBreakGlassAreNamed(t *testing.T) {
 	st := madeBinding(t, r, sch, plannedBinding("b"))
 	l.breakGlass["b"] = "0194b7a0-1111-7000-8000-000000000001"
 	plan := st
-	plan.Purpose = types.StringValue("x")
+	plan.Description = types.StringValue("x")
 	_, up := updateBinding(t, r, sch, st, plan)
 	if msg := errorText(up.Diagnostics); !strings.Contains(msg, "break-glass") || !strings.Contains(msg, "0194b7a0-1111") || !strings.Contains(msg, "reviewed") {
 		t.Fatalf("break-glass: %q", msg)
@@ -316,11 +316,11 @@ func TestBindingAllAttributesRoundTrip(t *testing.T) {
 	l := newLigoFake(t)
 	r, sch := bndRes(t, ligoSession(t, l, 20*time.Second))
 	m := plannedBinding("b")
-	m.Purpose, m.ExpiresAt = types.StringValue("reporting"), types.StringValue("2027-01-02T03:04:05+01:00")
-	m.Labels = types.MapValueMust(types.StringType, map[string]attr.Value{"team": types.StringValue("fin")})
+	m.Description, m.ExpiresAt = types.StringValue("reporting"), types.StringValue("2027-01-02T03:04:05+01:00")
+	m.Annotations = types.MapValueMust(types.StringType, map[string]attr.Value{"team": types.StringValue("fin")})
 	m.Managed = types.BoolValue(false)
 	got := madeBinding(t, r, sch, m)
-	if got.Purpose.ValueString() != "reporting" || got.ExpiresAt.ValueString() != "2027-01-02T03:04:05+01:00" || got.Labels.Elements()["team"].(types.String).ValueString() != "fin" || !got.ManagedBy.IsNull() {
+	if got.Description.ValueString() != "reporting" || got.ExpiresAt.ValueString() != "2027-01-02T03:04:05+01:00" || got.Annotations.Elements()["team"].(types.String).ValueString() != "fin" || !got.ManagedBy.IsNull() {
 		t.Errorf("state %+v", got)
 	}
 }
@@ -386,7 +386,7 @@ func TestBindingPlanLockChecks(t *testing.T) {
 	st.ID, st.Revision, st.Phase, st.PhaseMessage = types.StringValue("b"), types.Int64Value(1), types.StringValue("ACTIVE"), types.StringValue("")
 	st.ManagedBy, st.LastChangeRequest = types.StringValue("spiffe://prod.example.org/ci/other"), types.StringValue("c")
 	plan := st
-	plan.Purpose = types.StringValue("changed")
+	plan.Description = types.StringValue("changed")
 	if msg := errorText(planBinding(t, r2, sch2, &st, plan).Diagnostics); !strings.Contains(msg, "Managed by another automation") {
 		t.Fatalf("diagnostics: %q", msg)
 	}

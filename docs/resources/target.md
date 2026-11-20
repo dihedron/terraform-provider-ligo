@@ -51,10 +51,10 @@ resource "ligo_target" "ledger" {
 
 ### Optional
 
+- `annotations` (Map of String) Free-form key-value text, not interpreted by ligo.
 - `description` (String) What it is.
 - `display_name` (String) A name for people.
 - `documentation_url` (String) Where its documentation is.
-- `labels` (Map of String) Labels.
 - `managed` (Boolean) Whether this automation owns it (the lock): only the owner then changes it. Default: the provider's managed. false, on one that is managed, is the owner's release.
 - `network_flows` (String) The network flows the target needs, as JSON text.
 - `state` (String) ACTIVE (the default) or DEPRECATED (no new bindings). Removal retires it.

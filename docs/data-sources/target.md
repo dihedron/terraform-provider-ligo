@@ -28,12 +28,12 @@ data "ligo_target" "ledger" {
 ### Read-Only
 
 - `access_levels` (String) The access levels and their grants. As JSON text, in its normal form (sorted keys, no extra white space).
+- `annotations` (Map of String) Free-form key-value text, not interpreted by ligo.
 - `bindings` (Number) How many bindings use it.
 - `definition` (String) What the platform's plugin needs to reach the target. As JSON text, in its normal form (sorted keys, no extra white space).
 - `description` (String) What it is.
 - `display_name` (String) A name for people.
 - `jurisdiction` (String) The jurisdiction.
-- `labels` (Map of String) Labels.
 - `managed_by` (String) The SPIFFE ID of the automation that manages it (the lock); empty when nobody does.
 - `pending_change_request_id` (String) A change request of it that is still pending, if any.
 - `platform` (String) The platform that serves it.

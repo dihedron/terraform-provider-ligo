@@ -28,10 +28,10 @@ data "ligo_catalog_target" "ledger" {
 ### Read-Only
 
 - `access_levels` (String) The access levels. As JSON text, in its normal form (sorted keys, no extra white space).
+- `annotations` (Map of String) Free-form key-value text, not interpreted by ligo.
 - `description` (String) What it is.
 - `display_name` (String) A name for people.
 - `jurisdiction` (String) The jurisdiction.
-- `labels` (Map of String) Labels.
 - `outcomes` (String) For each of the caller's sources, what the charter says: allowed or not, by which rule, and which sides must consent. As JSON text, in its normal form (sorted keys, no extra white space).
 - `platform` (String) The platform.
 - `platform_jurisdiction` (String) The platform's jurisdiction.

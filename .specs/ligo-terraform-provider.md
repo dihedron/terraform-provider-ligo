@@ -90,6 +90,15 @@ The user's direction of 2026-11-08, restated on 2026-11-15: resources that Terra
 - **Adoption.** Adding `managed = true` to a resource brought in by `terraform import` is an update that the sides' people must consent to (they decide, not the automation): the apply waits like any other write (§3.3).
 - **Orphans.** A lock whose automation is gone is released by an administrator through a four-eyes request (`ligo source|target|binding release`); the provider has no part in it. A resource released that way reads `managed_by` empty, and the next apply with `managed = true` adopts it again.
 
+### 3.8 Description and annotations (`ligo` v0.12.0)
+
+The user's direction of 2026-11-20: the three resources use the names of `ligo` (`ligo/.specs/ligo-binding-annotations.md`, `ligo/.specs/ligo-resource-annotations.md`). Breaking, with no compatibility code (pre-1.0):
+
+- `ligo_binding`: `purpose` becomes `description` and `labels` becomes `annotations` (resource and data sources).
+- `ligo_source` and `ligo_target`: `labels` becomes `annotations`; `description` stays. The data sources `ligo_sources`, `ligo_targets` and `ligo_catalog_targets` filter with `annotation` instead of `label`.
+- `ligo` checks the limits (a description of 4096 characters, 32 annotations, keys and values as in the spec) and refuses a change request that breaks them with a `400`; the provider shows that error as it shows any other.
+- The provider needs `ligo` v0.12.0 or later: `go.mod` pins it. Tests: the fakes and fixtures use the new names; `TestResourceExamples` checks the examples against the schemas.
+
 ## 4. Threat model
 
 | # | Threat | Mitigation |

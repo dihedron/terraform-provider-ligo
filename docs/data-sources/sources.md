@@ -29,8 +29,8 @@ output "names" {
 
 ### Optional
 
+- `annotation` (String) An annotation, key=value.
 - `jurisdiction` (String) Only what lies in this jurisdiction pattern.
-- `label` (String) A label, key=value.
 - `limit` (Number) At most this many items (default 1000, at most 10000). More is an error, not a truncation: narrow the filters or raise the limit.
 - `q` (String) Matched in names, display names and descriptions.
 - `state` (String) ACTIVE, DEPRECATED or RETIRED; the default is every state but RETIRED.
@@ -45,11 +45,11 @@ output "names" {
 
 Read-Only:
 
+- `annotations` (Map of String) Free-form key-value text, not interpreted by ligo.
 - `bindings` (Number) How many bindings use it.
 - `description` (String) What it is.
 - `display_name` (String) A name for people.
 - `jurisdiction` (String) The jurisdiction, derived from the regex.
-- `labels` (Map of String) Labels.
 - `managed_by` (String) The SPIFFE ID of the automation that manages it (the lock); empty when nobody does.
 - `name` (String) The name.
 - `pending_change_request_id` (String) A change request of it that is still pending, if any.

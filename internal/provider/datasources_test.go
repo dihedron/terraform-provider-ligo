@@ -75,7 +75,7 @@ func TestSourcesFiltersAndPages(t *testing.T) {
 		}
 		return 200, page(sourceJSON("a", pipeline), "p2")
 	}
-	st, diags := read(t, "ligo_sources", f.session(t), map[string]any{"jurisdiction": "dc/*", "trust_domain": "prod.example.org", "state": "ACTIVE", "label": "team=fin", "q": "led"})
+	st, diags := read(t, "ligo_sources", f.session(t), map[string]any{"jurisdiction": "dc/*", "trust_domain": "prod.example.org", "state": "ACTIVE", "annotation": "team=fin", "q": "led"})
 	if diags.HasError() {
 		t.Fatal(errorText(diags))
 	}
@@ -83,7 +83,7 @@ func TestSourcesFiltersAndPages(t *testing.T) {
 		t.Errorf("items %q %q", a, b)
 	}
 	seen := strings.Join(f.seen(), "\n")
-	for _, q := range []string{"jurisdiction=dc%2F%2A", "trustDomain=prod.example.org", "state=ACTIVE", "label=team%3Dfin", "q=led", "pageToken=p2"} {
+	for _, q := range []string{"jurisdiction=dc%2F%2A", "trustDomain=prod.example.org", "state=ACTIVE", "annotation=team%3Dfin", "q=led", "pageToken=p2"} {
 		if !strings.Contains(seen, q) {
 			t.Errorf("no %s in the requests:\n%s", q, seen)
 		}

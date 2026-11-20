@@ -6,7 +6,7 @@ resource "ligo_source" "ledger_ci" {
   trust_domain = "prod.lab"
   svid_regex   = "^spiffe://prod\\.lab/ns/fin/sa/ledger-ci$"
 
-  labels = {
+  annotations = {
     team = "fin"
   }
 }

@@ -12,7 +12,7 @@ func sourceJSON(name, managedBy string) string {
 	if managedBy != "" {
 		mb = `"` + managedBy + `"`
 	}
-	return fmt.Sprintf(`{"apiVersion":"ligo.dihedron.org/v1alpha1","kind":"Source","displayName":"Ledger","labels":{"team":"fin"},
+	return fmt.Sprintf(`{"apiVersion":"ligo.dihedron.org/v1alpha1","kind":"Source","displayName":"Ledger","annotations":{"team":"fin"},
 		"identity":{"trustDomain":"prod.example.org","svidRegex":"spiffe://prod.example.org/ns/fin/sa/.*"},
 		"metadata":{"id":"%s","name":"%s","jurisdiction":"dc/corp-prod","state":"ACTIVE","revision":3,"managedBy":%s,"createdAt":"2026-11-01T10:00:00Z","createdBy":"x","updatedAt":"2026-11-02T10:00:00Z","updatedBy":"x","pendingChangeRequestId":null},
 		"status":{"bindings":2},"visibility":{"mode":"PUBLIC"}}`, idA, name, mb)
@@ -20,7 +20,7 @@ func sourceJSON(name, managedBy string) string {
 
 func targetJSON(name string) string {
 	return fmt.Sprintf(`{"apiVersion":"ligo.dihedron.org/v1alpha1","kind":"Target","accessLevels":[{"name":"read","grants":{"b":1,"a":["x"]}}],
-		"definition":{"zeta":1,"alpha":{"y":2,"x":1}},"labels":{},
+		"definition":{"zeta":1,"alpha":{"y":2,"x":1}},"annotations":{},
 		"metadata":{"id":"%s","name":"%s","jurisdiction":"dc/corp-prod/ledger","platform":"pg-ledger","platformJurisdiction":"dc/corp-prod","platformType":"postgres.v1","realm":"prod","state":"ACTIVE","revision":1,"managedBy":null,"createdAt":"2026-11-01T10:00:00Z","createdBy":"x","updatedAt":"2026-11-02T10:00:00Z","updatedBy":"x"},
 		"status":{"bindings":1},"visibility":{"mode":"PUBLIC"}}`, idB, name)
 }

@@ -327,7 +327,7 @@ resource "ligo_binding" "b" {
   target       = ligo_target.db.name
   access_level = "read"
   parameters   = %s
-  purpose      = %q
+  description  = %q
   managed      = false
 }
 `, params, purpose))

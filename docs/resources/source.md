@@ -21,7 +21,7 @@ resource "ligo_source" "ledger_ci" {
   trust_domain = "prod.lab"
   svid_regex   = "^spiffe://prod\\.lab/ns/fin/sa/ledger-ci$"
 
-  labels = {
+  annotations = {
     team = "fin"
   }
 }
@@ -38,9 +38,9 @@ resource "ligo_source" "ledger_ci" {
 
 ### Optional
 
+- `annotations` (Map of String) Free-form key-value text, not interpreted by ligo.
 - `description` (String) What it is.
 - `display_name` (String) A name for people.
-- `labels` (Map of String) Labels.
 - `managed` (Boolean) Whether this automation owns it (the lock): only the owner then changes it. Default: the provider's managed. false, on one that is managed, is the owner's release.
 - `sample_spiffe_ids` (List of String) SPIFFE IDs the regex must match, checked by ligo.
 - `state` (String) ACTIVE (the default) or DEPRECATED (no new bindings). Removal retires it.

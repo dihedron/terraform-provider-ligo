@@ -229,7 +229,7 @@ resource "ligo_binding" "b" {
   source       = ligo_source.s.name
   target       = ligo_target.t.name
   access_level = "read"
-  purpose      = "provider lab"
+  description  = "provider lab"
   parameters   = jsonencode({ connectionLimit = %[2]d })
 }
 `, suffix, limit)
