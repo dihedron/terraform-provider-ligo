@@ -4,7 +4,7 @@ Work agreed for later. An item here is not a specification: each needs its own, 
 
 | No. | Item | Recorded | Status |
 | :-- | :-- | :-- | :-- |
-| 1 | Soak run of apply and destroy cycles, before v0.2.0 | 2026-11-18 | Planned (§1) |
+| 1 | Soak run of apply and destroy cycles (v0.2.0 was released without it, 2026-11-20) | 2026-11-18 | Planned (§1); overdue |
 | 2 | Release to the Terraform and OpenTofu registries | 2026-11-18 | Waiting for a stable ecosystem (§2) |
 | 3 | Benchmark of a plan over 1,000 data source items | 2026-11-16 | Proposed in the spec (§5), not yet accepted (§3) |
 
