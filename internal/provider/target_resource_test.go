@@ -34,7 +34,7 @@ func plannedTarget(name string) targetModel {
 	return targetModel{
 		ID: types.StringUnknown(), Name: types.StringValue(name), Platform: types.StringValue("pg"), DisplayName: types.StringNull(), Description: types.StringNull(),
 		DocumentationURL: types.StringNull(), Definition: types.StringValue(`{"schema":"ledger","database":"ledger"}`),
-		AccessLevels: levelsOf(map[string]string{"read": `{"roles":["RO"]}`}), NetworkFlows: types.StringNull(), Labels: types.MapNull(types.StringType),
+		AccessLevels: levelsOf(map[string]string{"read": `{"roles":["RO"]}`}), NetworkFlows: types.StringNull(), Annotations: types.MapNull(types.StringType),
 		Visibility: types.StringUnknown(), VisibleTo: types.ListNull(types.StringType), State: types.StringUnknown(), Managed: types.BoolNull(),
 		Jurisdiction: types.StringValue("dc/corp-prod/ledger"), Revision: types.Int64Unknown(), ManagedBy: types.StringUnknown(), LastChangeRequest: types.StringUnknown(),
 	}

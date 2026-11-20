@@ -206,9 +206,9 @@ func (l *ligoFake) apply(id string) {
 	md["revision"] = md["revision"].(int64) + 1
 	switch op {
 	case "CREATE", "UPDATE":
-		keys := []string{"identity", "displayName", "description", "labels"}
+		keys := []string{"identity", "displayName", "description", "annotations"}
 		if typ == "TARGET" {
-			keys = []string{"definition", "accessLevels", "displayName", "description", "documentationUrl", "labels", "networkFlows"}
+			keys = []string{"definition", "accessLevels", "displayName", "description", "documentationUrl", "annotations", "networkFlows"}
 			if m, ok := body["metadata"].(map[string]any); ok {
 				md["platform"] = m["platform"]
 				if j, ok := m["jurisdiction"].(string); ok {

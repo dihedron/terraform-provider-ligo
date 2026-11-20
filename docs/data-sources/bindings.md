@@ -45,8 +45,9 @@ data "ligo_bindings" "of_source" {
 Read-Only:
 
 - `access_level` (String) The access level.
+- `annotations` (Map of String) Free-form key-value text, not interpreted by ligo.
+- `description` (String) What it is for, in plain text.
 - `expires_at` (String) When it expires (RFC 3339), if it does.
-- `labels` (Map of String) Labels.
 - `managed_by` (String) The SPIFFE ID of the automation that manages it (the lock); empty when nobody does.
 - `message` (String) The last message of the workflow.
 - `name` (String) The name.
@@ -57,7 +58,6 @@ Read-Only:
 - `platform_jurisdiction` (String) The platform's jurisdiction.
 - `platform_type` (String) The platform's type.
 - `propagation_pending` (Boolean) Whether a change is still being propagated.
-- `purpose` (String) Why it exists.
 - `realm` (String) The realm.
 - `revision` (Number) The revision; an update must name it.
 - `source` (String) The source.

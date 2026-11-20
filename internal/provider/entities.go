@@ -74,7 +74,7 @@ func stv(id fmt.Stringer) attr.Value {
 	return types.StringValue(id.String())
 }
 
-func labelsV(m *map[string]string) attr.Value {
+func annotationsV(m *map[string]string) attr.Value {
 	if m == nil {
 		return types.MapNull(types.StringType)
 	}
@@ -131,7 +131,7 @@ func commonFilters() map[string]filterAttr {
 	return map[string]filterAttr{
 		"jurisdiction": {desc: "Only what lies in this jurisdiction pattern."},
 		"state":        {desc: "ACTIVE, DEPRECATED or RETIRED; the default is every state but RETIRED."},
-		"label":        {desc: "A label, key=value."},
+		"annotation":   {desc: "An annotation, key=value."},
 		"q":            {desc: "Matched in names, display names and descriptions."},
 	}
 }
@@ -141,7 +141,7 @@ func sourceVals(m adminclient.Source) (vals, error) {
 		"name": sv(m.Metadata.Name), "display_name": sp(m.DisplayName), "description": sp(m.Description),
 		"trust_domain": sv(m.Identity.TrustDomain), "svid_regex": sv(m.Identity.SvidRegex),
 		"jurisdiction": sv(m.Metadata.Jurisdiction), "state": sv(string(m.Metadata.State)), "revision": iv(m.Metadata.Revision),
-		"managed_by": sp(m.Metadata.ManagedBy), "labels": labelsV(m.Labels), "visibility": sv(string(m.Visibility.Mode)),
+		"managed_by": sp(m.Metadata.ManagedBy), "annotations": annotationsV(m.Annotations), "visibility": sv(string(m.Visibility.Mode)),
 		"bindings": iv(int64(m.Status.Bindings)), "pending_change_request_id": stv(ptrID(m.Metadata.PendingChangeRequestId)),
 	}, nil
 }
@@ -151,7 +151,7 @@ var sourceItem = map[string]schema.Attribute{
 	"trust_domain": strA("The trust domain of the SPIFFE IDs it matches."), "svid_regex": strA("The SPIFFE ID regex."),
 	"jurisdiction": strA("The jurisdiction, derived from the regex."), "state": strA("ACTIVE, DEPRECATED or RETIRED."),
 	"revision": intA("The revision; an update must name it."), "managed_by": strA("The SPIFFE ID of the automation that manages it (the lock); empty when nobody does."),
-	"labels": mapA("Labels."), "visibility": strA("Who may see it in the catalog: the visibility mode."), "bindings": intA("How many bindings use it."),
+	"annotations": mapA("Free-form key-value text, not interpreted by ligo."), "visibility": strA("Who may see it in the catalog: the visibility mode."), "bindings": intA("How many bindings use it."),
 	"pending_change_request_id": strA("A change request of it that is still pending, if any."),
 }
 
@@ -169,7 +169,7 @@ func targetVals(m adminclient.Target) (vals, error) {
 		"platform": sv(m.Metadata.Platform), "platform_type": sv(m.Metadata.PlatformType), "realm": sv(m.Metadata.Realm),
 		"jurisdiction": sv(m.Metadata.Jurisdiction), "platform_jurisdiction": sv(m.Metadata.PlatformJurisdiction),
 		"state": sv(string(m.Metadata.State)), "revision": iv(m.Metadata.Revision), "managed_by": sp(m.Metadata.ManagedBy),
-		"labels": labelsV(m.Labels), "visibility": sv(string(m.Visibility.Mode)), "definition": def, "access_levels": lv,
+		"annotations": annotationsV(m.Annotations), "visibility": sv(string(m.Visibility.Mode)), "definition": def, "access_levels": lv,
 		"bindings": iv(int64(m.Status.Bindings)), "pending_change_request_id": stv(ptrID(m.Metadata.PendingChangeRequestId)),
 	}, nil
 }
@@ -179,8 +179,8 @@ var targetItem = map[string]schema.Attribute{
 	"platform": strA("The platform that serves it."), "platform_type": strA("The platform's type."), "realm": strA("The realm."),
 	"jurisdiction": strA("The jurisdiction."), "platform_jurisdiction": strA("The platform's jurisdiction."),
 	"state": strA("ACTIVE, DEPRECATED or RETIRED."), "revision": intA("The revision; an update must name it."),
-	"managed_by": strA("The SPIFFE ID of the automation that manages it (the lock); empty when nobody does."),
-	"labels":     mapA("Labels."), "visibility": strA("The visibility mode."),
+	"managed_by":  strA("The SPIFFE ID of the automation that manages it (the lock); empty when nobody does."),
+	"annotations": mapA("Free-form key-value text, not interpreted by ligo."), "visibility": strA("The visibility mode."),
 	"definition":    jsonA("What the platform's plugin needs to reach the target."),
 	"access_levels": jsonA("The access levels and their grants."),
 	"bindings":      intA("How many bindings use it."), "pending_change_request_id": strA("A change request of it that is still pending, if any."),
@@ -192,22 +192,22 @@ func bindingVals(m adminclient.Binding) (vals, error) {
 		return nil, err
 	}
 	return vals{
-		"name": sv(m.Metadata.Name), "source": sv(m.Source), "target": sv(m.Target), "access_level": sv(m.AccessLevel), "purpose": sp(m.Purpose),
+		"name": sv(m.Metadata.Name), "source": sv(m.Source), "target": sv(m.Target), "access_level": sv(m.AccessLevel), "description": sp(m.Description),
 		"expires_at": tv(m.ExpiresAt), "platform": sv(m.Metadata.Platform), "platform_type": sv(m.Metadata.PlatformType), "realm": sv(m.Metadata.Realm),
 		"source_jurisdiction": sv(m.Metadata.SourceJurisdiction), "target_jurisdiction": sv(m.Metadata.TargetJurisdiction),
 		"platform_jurisdiction": sv(m.Metadata.PlatformJurisdiction), "revision": iv(m.Metadata.Revision), "managed_by": sp(m.Metadata.ManagedBy),
-		"labels": labelsV(m.Labels), "parameters": params, "phase": sv(string(m.Status.Phase)), "message": sv(m.Status.Message),
+		"annotations": annotationsV(m.Annotations), "parameters": params, "phase": sv(string(m.Status.Phase)), "message": sv(m.Status.Message),
 		"propagation_pending": bv(m.Status.PropagationPending), "pending_change_request_id": stv(ptrID(m.Status.PendingChangeRequestId)),
 	}, nil
 }
 
 var bindingItem = map[string]schema.Attribute{
 	"name": strA("The name."), "source": strA("The source."), "target": strA("The target."), "access_level": strA("The access level."),
-	"purpose": strA("Why it exists."), "expires_at": strA("When it expires (RFC 3339), if it does."), "platform": strA("The platform."),
+	"description": strA("What it is for, in plain text."), "expires_at": strA("When it expires (RFC 3339), if it does."), "platform": strA("The platform."),
 	"platform_type": strA("The platform's type."), "realm": strA("The realm."), "source_jurisdiction": strA("The source's jurisdiction."),
 	"target_jurisdiction": strA("The target's jurisdiction."), "platform_jurisdiction": strA("The platform's jurisdiction."),
 	"revision": intA("The revision; an update must name it."), "managed_by": strA("The SPIFFE ID of the automation that manages it (the lock); empty when nobody does."),
-	"labels": mapA("Labels."), "parameters": jsonA("The parameters of the access."), "phase": strA("PROVISIONING, ACTIVE, FAILED, DELETING or DELETE_FAILED."),
+	"annotations": mapA("Free-form key-value text, not interpreted by ligo."), "parameters": jsonA("The parameters of the access."), "phase": strA("PROVISIONING, ACTIVE, FAILED, DELETING or DELETE_FAILED."),
 	"message": strA("The last message of the workflow."), "propagation_pending": boolA("Whether a change is still being propagated."),
 	"pending_change_request_id": strA("A change request of it that is still pending, if any."),
 }
@@ -312,7 +312,7 @@ func catalogVals(m adminclient.CatalogTarget) (vals, error) {
 	v := vals{
 		"name": sv(m.Name), "display_name": sp(m.DisplayName), "description": sp(m.Description), "jurisdiction": sv(m.Jurisdiction),
 		"platform": sv(m.Platform), "platform_type": sv(m.PlatformType), "platform_jurisdiction": sv(m.PlatformJurisdiction),
-		"state": sv(string(m.State)), "labels": labelsV(m.Labels),
+		"state": sv(string(m.State)), "annotations": annotationsV(m.Annotations),
 	}
 	if m.Bound != nil {
 		v["bound"] = bv(*m.Bound)
@@ -323,7 +323,7 @@ func catalogVals(m adminclient.CatalogTarget) (vals, error) {
 var catalogItem = map[string]schema.Attribute{
 	"name": strA("The name."), "display_name": strA("A name for people."), "description": strA("What it is."), "jurisdiction": strA("The jurisdiction."),
 	"platform": strA("The platform."), "platform_type": strA("The platform's type."), "platform_jurisdiction": strA("The platform's jurisdiction."),
-	"state": strA("ACTIVE or DEPRECATED."), "labels": mapA("Labels."), "bound": boolA("With for_source: whether that source is already bound to it."),
+	"state": strA("ACTIVE or DEPRECATED."), "annotations": mapA("Free-form key-value text, not interpreted by ligo."), "bound": boolA("With for_source: whether that source is already bound to it."),
 }
 
 func catalogCardVals(m adminclient.CatalogDetail) (vals, error) {
@@ -338,14 +338,14 @@ func catalogCardVals(m adminclient.CatalogDetail) (vals, error) {
 	return vals{
 		"name": sv(m.Metadata.Name), "display_name": sp(m.DisplayName), "description": sp(m.Description), "jurisdiction": sv(m.Metadata.Jurisdiction),
 		"platform": sv(m.Metadata.Platform), "platform_type": sv(m.Metadata.PlatformType), "platform_jurisdiction": sv(m.Metadata.PlatformJurisdiction),
-		"state": sv(string(m.Metadata.State)), "labels": labelsV(m.Labels), "access_levels": lv, "outcomes": out,
+		"state": sv(string(m.Metadata.State)), "annotations": annotationsV(m.Annotations), "access_levels": lv, "outcomes": out,
 	}, nil
 }
 
 var catalogCardItem = map[string]schema.Attribute{
 	"name": strA("The name."), "display_name": strA("A name for people."), "description": strA("What it is."), "jurisdiction": strA("The jurisdiction."),
 	"platform": strA("The platform."), "platform_type": strA("The platform's type."), "platform_jurisdiction": strA("The platform's jurisdiction."),
-	"state": strA("ACTIVE or DEPRECATED."), "labels": mapA("Labels."), "access_levels": jsonA("The access levels."),
+	"state": strA("ACTIVE or DEPRECATED."), "annotations": mapA("Free-form key-value text, not interpreted by ligo."), "access_levels": jsonA("The access levels."),
 	"outcomes": jsonA("For each of the caller's sources, what the charter says: allowed or not, by which rule, and which sides must consent."),
 }
 
@@ -390,12 +390,12 @@ func entities() []*entity {
 				if err != nil {
 					return nil, err
 				}
-				return sourceVals(adminclient.Source{ApiVersion: d.ApiVersion, Identity: d.Identity, Labels: d.Labels, Metadata: d.Metadata, Status: d.Status,
+				return sourceVals(adminclient.Source{ApiVersion: d.ApiVersion, Identity: d.Identity, Annotations: d.Annotations, Metadata: d.Metadata, Status: d.Status,
 					Visibility: d.Visibility, DisplayName: d.DisplayName, Description: d.Description})
 			},
 			list: func(ctx context.Context, c *adminclient.Client, f filters) iter.Seq2[vals, error] {
 				return pages(c.ListSources(ctx, adminclient.SourceFilter{Jurisdiction: f.s["jurisdiction"], TrustDomain: f.s["trust_domain"], State: f.s["state"],
-					Label: f.s["label"], Q: f.s["q"], PageSize: 200}), sourceVals)
+					Annotation: f.s["annotation"], Q: f.s["q"], PageSize: 200}), sourceVals)
 			},
 		},
 		{
@@ -406,11 +406,11 @@ func entities() []*entity {
 					return nil, err
 				}
 				return targetVals(adminclient.Target{AccessLevels: d.AccessLevels, ApiVersion: d.ApiVersion, Definition: d.Definition, Description: d.Description,
-					DisplayName: d.DisplayName, Labels: d.Labels, Metadata: d.Metadata, Status: d.Status, Visibility: d.Visibility})
+					DisplayName: d.DisplayName, Annotations: d.Annotations, Metadata: d.Metadata, Status: d.Status, Visibility: d.Visibility})
 			},
 			list: func(ctx context.Context, c *adminclient.Client, f filters) iter.Seq2[vals, error] {
 				return pages(c.ListTargets(ctx, adminclient.TargetFilter{Q: f.s["q"], Platform: f.s["platform"], PlatformType: f.s["platform_type"],
-					Jurisdiction: f.s["jurisdiction"], Label: f.s["label"], State: f.s["state"], PageSize: 200}), targetVals)
+					Jurisdiction: f.s["jurisdiction"], Annotation: f.s["annotation"], State: f.s["state"], PageSize: 200}), targetVals)
 			},
 		},
 		{
@@ -426,8 +426,8 @@ func entities() []*entity {
 				if err != nil {
 					return nil, err
 				}
-				return bindingVals(adminclient.Binding{AccessLevel: d.AccessLevel, ExpiresAt: d.ExpiresAt, Labels: d.Labels, Metadata: d.Metadata,
-					Parameters: d.Parameters, Purpose: d.Purpose, Source: d.Source, Status: d.Status, Target: d.Target})
+				return bindingVals(adminclient.Binding{AccessLevel: d.AccessLevel, ExpiresAt: d.ExpiresAt, Annotations: d.Annotations, Metadata: d.Metadata,
+					Parameters: d.Parameters, Description: d.Description, Source: d.Source, Status: d.Status, Target: d.Target})
 			},
 			list: func(ctx context.Context, c *adminclient.Client, f filters) iter.Seq2[vals, error] {
 				return pages(c.ListBindings(ctx, adminclient.BindingFilter{Source: f.s["source"], Target: f.s["target"], AccessLevel: f.s["access_level"],
@@ -478,13 +478,13 @@ func entities() []*entity {
 			kind: "catalog_target", plural: "catalog_targets", desc: "The targets that the caller's sources could request.", item: catalogItem,
 			filters: map[string]filterAttr{
 				"q": {desc: "Matched in names, display names and descriptions."}, "platform": {desc: "Only this platform."}, "platform_type": {desc: "Only platforms of this type."},
-				"jurisdiction": {desc: "Only this jurisdiction pattern."}, "label": {desc: "A label, key=value."},
+				"jurisdiction": {desc: "Only this jurisdiction pattern."}, "annotation": {desc: "An annotation, key=value."},
 				"for_source":         {desc: "Only the targets that the charter allows for this source; the ones bound to it are marked."},
 				"include_deprecated": {desc: "Include the deprecated targets.", boolean: true},
 			},
 			list: func(ctx context.Context, c *adminclient.Client, f filters) iter.Seq2[vals, error] {
 				return pages(c.SearchCatalog(ctx, adminclient.CatalogFilter{Q: f.s["q"], Platform: f.s["platform"], PlatformType: f.s["platform_type"],
-					Jurisdiction: f.s["jurisdiction"], Label: f.s["label"], ForSource: f.s["for_source"], IncludeDeprecated: f.b["include_deprecated"], PageSize: 200}), catalogVals)
+					Jurisdiction: f.s["jurisdiction"], Annotation: f.s["annotation"], ForSource: f.s["for_source"], IncludeDeprecated: f.b["include_deprecated"], PageSize: 200}), catalogVals)
 			},
 		},
 		{

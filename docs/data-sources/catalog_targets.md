@@ -23,10 +23,10 @@ data "ligo_catalog_targets" "for_ci" {
 
 ### Optional
 
+- `annotation` (String) An annotation, key=value.
 - `for_source` (String) Only the targets that the charter allows for this source; the ones bound to it are marked.
 - `include_deprecated` (Boolean) Include the deprecated targets.
 - `jurisdiction` (String) Only this jurisdiction pattern.
-- `label` (String) A label, key=value.
 - `limit` (Number) At most this many items (default 1000, at most 10000). More is an error, not a truncation: narrow the filters or raise the limit.
 - `platform` (String) Only this platform.
 - `platform_type` (String) Only platforms of this type.
@@ -41,11 +41,11 @@ data "ligo_catalog_targets" "for_ci" {
 
 Read-Only:
 
+- `annotations` (Map of String) Free-form key-value text, not interpreted by ligo.
 - `bound` (Boolean) With for_source: whether that source is already bound to it.
 - `description` (String) What it is.
 - `display_name` (String) A name for people.
 - `jurisdiction` (String) The jurisdiction.
-- `labels` (Map of String) Labels.
 - `name` (String) The name.
 - `platform` (String) The platform.
 - `platform_jurisdiction` (String) The platform's jurisdiction.

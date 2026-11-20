@@ -6,7 +6,7 @@ resource "ligo_binding" "ledger_app_reads" {
   source       = ligo_source.ledger_app.name
   target       = ligo_target.ledger.name
   access_level = "read"
-  purpose      = "Month-end reports"
+  description  = "Month-end reports"
   expires_at   = "2027-06-30T00:00:00Z"
 
   parameters = jsonencode({

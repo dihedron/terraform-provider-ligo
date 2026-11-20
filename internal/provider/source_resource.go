@@ -38,7 +38,7 @@ type sourceModel struct {
 	TrustDomain       types.String `tfsdk:"trust_domain"`
 	SvidRegex         types.String `tfsdk:"svid_regex"`
 	SampleSpiffeIDs   types.List   `tfsdk:"sample_spiffe_ids"`
-	Labels            types.Map    `tfsdk:"labels"`
+	Annotations       types.Map    `tfsdk:"annotations"`
 	Visibility        types.String `tfsdk:"visibility"`
 	VisibleTo         types.List   `tfsdk:"visible_to"`
 	State             types.String `tfsdk:"state"`
@@ -66,7 +66,7 @@ func (r *sourceResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"trust_domain":      schema.StringAttribute{Required: true, Description: "The trust domain of the SPIFFE IDs it matches."},
 			"svid_regex":        schema.StringAttribute{Required: true, Description: "The SPIFFE ID regex; an update may only narrow it, and ligo refuses a widening."},
 			"sample_spiffe_ids": schema.ListAttribute{Optional: true, ElementType: types.StringType, Description: "SPIFFE IDs the regex must match, checked by ligo."},
-			"labels":            schema.MapAttribute{Optional: true, ElementType: types.StringType, Description: "Labels."},
+			"annotations":       schema.MapAttribute{Optional: true, ElementType: types.StringType, Description: "Free-form key-value text, not interpreted by ligo."},
 			"visibility":        schema.StringAttribute{Optional: true, Computed: true, PlanModifiers: keep, Description: "Who may see it in the catalog: PUBLIC, PRIVATE or SELECTED. Default: ligo's."},
 			"visible_to":        schema.ListAttribute{Optional: true, ElementType: types.StringType, Description: "With SELECTED, the jurisdiction patterns that may see it."},
 			"state":             schema.StringAttribute{Optional: true, Computed: true, PlanModifiers: keep, Description: "ACTIVE (the default) or DEPRECATED (no new bindings). Removal retires it."},
@@ -145,8 +145,8 @@ func (m sourceModel) body() map[string]any {
 	if v := optStr(m.Description); v != nil {
 		b["description"] = *v
 	}
-	if l := strMap(m.Labels); l != nil {
-		b["labels"] = *l
+	if l := strMap(m.Annotations); l != nil {
+		b["annotations"] = *l
 	}
 	if v := optStr(m.Visibility); v != nil {
 		vis := map[string]any{"mode": *v}
@@ -260,7 +260,7 @@ func (r *sourceResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 	st.fill(adminclient.Source{Identity: s.Identity, Metadata: s.Metadata, Visibility: s.Visibility})
 	st.DisplayName, st.Description = types.StringPointerValue(s.DisplayName), types.StringPointerValue(s.Description)
-	st.Labels = labelsOrNull(s.Labels, st.Labels)
+	st.Annotations = annotationsOrNull(s.Annotations, st.Annotations)
 	st.SampleSpiffeIDs = sampleIDs(s.Identity.SampleSpiffeIds, st.SampleSpiffeIDs)
 	if s.Visibility.VisibleTo != nil {
 		st.VisibleTo = listOf(*s.Visibility.VisibleTo)
@@ -268,15 +268,15 @@ func (r *sourceResource) Read(ctx context.Context, req resource.ReadRequest, res
 	resp.Diagnostics.Append(resp.State.Set(ctx, st)...)
 }
 
-// labelsOrNull is ligo's labels; an empty map from ligo is the null the user left.
-func labelsOrNull(l *map[string]string, prior types.Map) types.Map {
+// annotationsOrNull is ligo's annotations; an empty map from ligo is the null the user left.
+func annotationsOrNull(l *map[string]string, prior types.Map) types.Map {
 	if l == nil || len(*l) == 0 {
 		if prior.IsNull() {
 			return prior
 		}
 		return types.MapValueMust(types.StringType, map[string]attr.Value{})
 	}
-	return labelsV(l).(types.Map)
+	return annotationsV(l).(types.Map)
 }
 
 func sampleIDs(ids *[]string, prior types.List) types.List {
@@ -330,7 +330,7 @@ func (r *sourceResource) Update(ctx context.Context, req resource.UpdateRequest,
 // specChanged tells whether the plan changes what UpdateSource files (the lock included).
 func (r *sourceResource) specChanged(plan, st sourceModel) bool {
 	same := []bool{plan.DisplayName.Equal(st.DisplayName), plan.Description.Equal(st.Description), plan.TrustDomain.Equal(st.TrustDomain),
-		plan.SvidRegex.Equal(st.SvidRegex), plan.SampleSpiffeIDs.Equal(st.SampleSpiffeIDs), plan.Labels.Equal(st.Labels),
+		plan.SvidRegex.Equal(st.SvidRegex), plan.SampleSpiffeIDs.Equal(st.SampleSpiffeIDs), plan.Annotations.Equal(st.Annotations),
 		plan.Visibility.Equal(st.Visibility), plan.VisibleTo.Equal(st.VisibleTo), plan.Managed.Equal(st.Managed)}
 	return slices.Contains(same, false)
 }

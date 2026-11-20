@@ -23,8 +23,8 @@ data "ligo_targets" "postgres" {
 
 ### Optional
 
+- `annotation` (String) An annotation, key=value.
 - `jurisdiction` (String) Only what lies in this jurisdiction pattern.
-- `label` (String) A label, key=value.
 - `limit` (Number) At most this many items (default 1000, at most 10000). More is an error, not a truncation: narrow the filters or raise the limit.
 - `platform` (String) Only the targets of this platform.
 - `platform_type` (String) Only the targets of platforms of this type.
@@ -41,12 +41,12 @@ data "ligo_targets" "postgres" {
 Read-Only:
 
 - `access_levels` (String) The access levels and their grants. As JSON text, in its normal form (sorted keys, no extra white space).
+- `annotations` (Map of String) Free-form key-value text, not interpreted by ligo.
 - `bindings` (Number) How many bindings use it.
 - `definition` (String) What the platform's plugin needs to reach the target. As JSON text, in its normal form (sorted keys, no extra white space).
 - `description` (String) What it is.
 - `display_name` (String) A name for people.
 - `jurisdiction` (String) The jurisdiction.
-- `labels` (Map of String) Labels.
 - `managed_by` (String) The SPIFFE ID of the automation that manages it (the lock); empty when nobody does.
 - `name` (String) The name.
 - `pending_change_request_id` (String) A change request of it that is still pending, if any.

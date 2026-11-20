@@ -26,7 +26,7 @@ resource "ligo_binding" "ledger_ci_reads" {
   source       = ligo_source.ledger_ci.name
   target       = ligo_target.ledger.name
   access_level = "read"
-  purpose      = "Month-end reports"
+  description  = "Month-end reports"
 }
 ```
 

@@ -37,7 +37,7 @@ func srcRes(t *testing.T, s *Session) (*sourceResource, resource.SchemaResponse)
 func planned(name, regex string) sourceModel {
 	return sourceModel{
 		ID: types.StringUnknown(), Name: types.StringValue(name), TrustDomain: types.StringValue("prod.example.org"), SvidRegex: types.StringValue(regex),
-		DisplayName: types.StringNull(), Description: types.StringNull(), SampleSpiffeIDs: types.ListNull(types.StringType), Labels: types.MapNull(types.StringType),
+		DisplayName: types.StringNull(), Description: types.StringNull(), SampleSpiffeIDs: types.ListNull(types.StringType), Annotations: types.MapNull(types.StringType),
 		Visibility: types.StringUnknown(), VisibleTo: types.ListNull(types.StringType), State: types.StringUnknown(), Managed: types.BoolNull(),
 		Jurisdiction: types.StringUnknown(), Revision: types.Int64Unknown(), ManagedBy: types.StringUnknown(), LastChangeRequest: types.StringUnknown(),
 	}
@@ -462,7 +462,7 @@ func TestSourceAllAttributesRoundTrip(t *testing.T) {
 	r, sch := srcRes(t, ligoSession(t, l, 5*time.Second))
 	m := planned("s", "^spiffe://x/a$")
 	m.DisplayName, m.Description = types.StringValue("Ledger"), types.StringValue("the ledger")
-	m.Labels = types.MapValueMust(types.StringType, map[string]attr.Value{"team": types.StringValue("fin")})
+	m.Annotations = types.MapValueMust(types.StringType, map[string]attr.Value{"team": types.StringValue("fin")})
 	m.SampleSpiffeIDs = strsV([]string{"spiffe://x/a"}).(types.List)
 	m.Visibility, m.VisibleTo = types.StringValue("SELECTED"), strsV([]string{"dc/*"}).(types.List)
 	st := created(t, l, r, sch, m)
@@ -470,7 +470,7 @@ func TestSourceAllAttributesRoundTrip(t *testing.T) {
 	r.Read(context.Background(), resource.ReadRequest{State: stateOf(t, sch, st)}, &resp)
 	var got sourceModel
 	resp.State.Get(context.Background(), &got)
-	if resp.Diagnostics.HasError() || got.Labels.Elements()["team"].(types.String).ValueString() != "fin" || got.Visibility.ValueString() != "SELECTED" ||
+	if resp.Diagnostics.HasError() || got.Annotations.Elements()["team"].(types.String).ValueString() != "fin" || got.Visibility.ValueString() != "SELECTED" ||
 		len(got.VisibleTo.Elements()) != 1 || len(got.SampleSpiffeIDs.Elements()) != 1 || got.DisplayName.ValueString() != "Ledger" {
 		t.Errorf("read %v %+v", errorText(resp.Diagnostics), got)
 	}
